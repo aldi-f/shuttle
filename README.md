@@ -75,6 +75,32 @@ in-memory browser login. Shuttle still requests separate temporary AWS
 credentials for each profile's account and role. The shared login is forgotten
 when Shuttle closes and is never written to disk.
 
+## Updates
+
+Packaged builds check the repository's latest GitHub Release shortly after
+startup. When a newer version is available, Shuttle offers to download the
+matching platform artifact, verifies it against the release's `SHA256SUMS`,
+then replaces the portable executable or app bundle and restarts.
+
+The update check runs in the background and update prompts wait until active
+operations finish. Use **Help > Check for updates…** to check manually. Source
+development runs can detect releases, but only packaged PyInstaller builds can
+install an update automatically.
+
+Updates rely on GitHub HTTPS and release checksums; the artifacts are not yet
+code-signed.
+
+## Saved jobs
+
+Saved jobs contain non-secret inputs and options only. They are stored in:
+
+- Linux: `~/.local/share/Shuttle/Shuttle/jobs.json`
+- Windows: `%APPDATA%\Shuttle\Shuttle\jobs.json`
+- macOS: `~/Library/Application Support/Shuttle/Shuttle/jobs.json`
+
+Transfer activity logs are currently kept in the application window only and
+are not persisted after Shuttle exits.
+
 ## Mirror safety
 
 Mirror mode treats the selected local destination as the root of the selected S3
@@ -124,7 +150,6 @@ artifacts, and attaches them to a GitHub Release:
 - `Shuttle-linux-amd64`
 - `Shuttle-windows-amd64.exe`
 - `Shuttle-macos-arm64.zip`
-- `Shuttle-macos-amd64.zip`
 
 Create and push a release tag with:
 

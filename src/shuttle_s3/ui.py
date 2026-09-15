@@ -13,6 +13,7 @@ from PySide6.QtCore import (
     QStringListModel,
     Qt,
     QThreadPool,
+    QTimer,
     Signal,
 )
 from PySide6.QtGui import QAction
@@ -40,6 +41,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from . import __version__
 from .auth import AuthenticationCancelled, DeviceAuthorization, SsoAuthenticator
 from .jobs import JobStore, SavedJob
 from .matching import fuzzy_matches
@@ -51,6 +53,7 @@ from .s3 import (
     TransferPlan,
     format_bytes,
 )
+from .updater import AvailableUpdate, UpdateClient, install_and_restart
 
 
 class WorkerSignals(QObject):
@@ -99,6 +102,8 @@ class MainWindow(QMainWindow):
         self.browsed_bucket = ""
         self.browsed_prefix = ""
         self.bucket_names: list[str] = []
+        self.update_client = UpdateClient()
+        self.background_workers: set[Worker] = set()
 
         data_root = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
         self.job_store = JobStore(Path(data_root) / "jobs.json")
@@ -107,6 +112,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._load_profiles()
         self._load_jobs()
+        QTimer.singleShot(1500, self._check_for_updates)
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -227,6 +233,9 @@ class MainWindow(QMainWindow):
         exit_action = QAction("Exit", self)
         exit_action.triggered.connect(QApplication.quit)
         self.menuBar().addMenu("File").addAction(exit_action)
+        check_updates_action = QAction("Check for updates…", self)
+        check_updates_action.triggered.connect(lambda: self._check_for_updates(manual=True))
+        self.menuBar().addMenu("Help").addAction(check_updates_action)
 
         self.refresh_profiles_button.clicked.connect(self._load_profiles)
         self.profile_combo.currentTextChanged.connect(self._profile_changed)
@@ -330,6 +339,77 @@ class MainWindow(QMainWindow):
         if callback is not None:
             callback()
         self._set_busy(bool(self.active_workers))
+
+    def _start_background_worker(
+        self,
+        function: Callable[[WorkerSignals], Any],
+        result: Callable[[Any], None],
+        *,
+        show_errors: bool,
+    ) -> None:
+        worker = Worker(function)
+        self.background_workers.add(worker)
+        worker.signals.result.connect(result)
+        if show_errors:
+            worker.signals.error.connect(self._show_error)
+        worker.signals.finished.connect(
+            lambda active_worker=worker: self.background_workers.discard(active_worker)
+        )
+        self.thread_pool.start(worker)
+
+    def _check_for_updates(self, *, manual: bool = False) -> None:
+        if self.background_workers:
+            return
+
+        def checked(update: Any) -> None:
+            if update is None:
+                if manual:
+                    QMessageBox.information(
+                        self,
+                        "Shuttle updates",
+                        f"Shuttle {__version__} is the latest version.",
+                    )
+                return
+            self._offer_update(update)
+
+        self._start_background_worker(
+            lambda _signals: self.update_client.check(__version__),
+            checked,
+            show_errors=manual,
+        )
+
+    def _offer_update(self, update: AvailableUpdate) -> None:
+        if self.active_workers:
+            QTimer.singleShot(3000, lambda: self._offer_update(update))
+            return
+        answer = QMessageBox.question(
+            self,
+            "Shuttle update available",
+            f"Shuttle {update.version} is available. You are using {__version__}.\n\n"
+            "Download the update and restart Shuttle?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        self.log.appendPlainText(f"Downloading Shuttle {update.version} update…")
+        self.progress.setValue(0)
+
+        def download(signals: WorkerSignals) -> Any:
+            return self.update_client.download(
+                update,
+                on_progress=signals.progress.emit,
+            )
+
+        def downloaded(path: Any) -> None:
+            try:
+                install_and_restart(path)
+            except Exception as error:
+                self._show_error(str(error))
+                return
+            QApplication.quit()
+
+        self._start_worker(download, downloaded)
 
     def _sign_in(self) -> None:
         profile = self.profiles.get(self.profile_combo.currentText())

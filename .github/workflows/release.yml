@@ -46,8 +46,6 @@ jobs:
             artifact: Shuttle-windows-amd64
           - runner: macos-15
             artifact: Shuttle-macos-arm64
-          - runner: macos-15-intel
-            artifact: Shuttle-macos-amd64
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Check out repository
