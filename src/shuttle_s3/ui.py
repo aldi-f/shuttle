@@ -255,7 +255,7 @@ class MainWindow(QMainWindow):
         self.job_combo.currentIndexChanged.connect(self._apply_job)
         self.source_edit.textChanged.connect(self._invalidate_plan)
         self.destination_edit.textChanged.connect(self._invalidate_plan)
-        self.bucket_combo.currentTextChanged.connect(self._invalidate_plan)
+        self.bucket_combo.currentTextChanged.connect(self._bucket_changed)
         self.bucket_combo.lineEdit().textEdited.connect(self._update_bucket_matches)
         self.mode_combo.currentIndexChanged.connect(self._invalidate_plan)
         self.mode_combo.currentIndexChanged.connect(self._update_option_help)
@@ -489,6 +489,15 @@ class MainWindow(QMainWindow):
         if text and matches:
             self.bucket_completer.complete()
 
+    def _bucket_changed(self, _bucket: str) -> None:
+        self.source_edit.clear()
+        self.remote_entries = []
+        self.browsed_bucket = ""
+        self.browsed_prefix = ""
+        self.remote_table.clearContents()
+        self.remote_table.setRowCount(0)
+        self._invalidate_plan()
+
     def _browse_s3(self) -> None:
         service = self._require_service()
         if service is None:
@@ -504,6 +513,10 @@ class MainWindow(QMainWindow):
         )
 
     def _show_remote_entries(self, entries: Any, bucket: str, prefix: str) -> None:
+        current_bucket = self.bucket_combo.currentText().strip()
+        current_prefix = self.source_edit.text().strip().lstrip("/")
+        if current_bucket != bucket or current_prefix != prefix:
+            return
         self.remote_entries = list(entries)
         self.browsed_bucket = bucket
         self.browsed_prefix = prefix
