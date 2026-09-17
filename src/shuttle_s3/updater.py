@@ -177,7 +177,62 @@ def _write_unix_helper(current: Path, replacement: Path, *, macos: bool) -> Path
     helper.chmod(0o700)
     subprocess.Popen(
         [str(helper), str(os.getpid()), str(current), str(replacement)],
+        env=_restart_environment(),
         start_new_session=True,
+    )
+    return helper
+
+
+def _restart_environment() -> dict[str, str]:
+    """Return a clean environment for a new top-level PyInstaller process."""
+    environment = os.environ.copy()
+    environment["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    original_library_path = environment.pop("LD_LIBRARY_PATH_ORIG", None)
+    if original_library_path is None:
+        environment.pop("LD_LIBRARY_PATH", None)
+    else:
+        environment["LD_LIBRARY_PATH"] = original_library_path
+    return environment
+
+
+def _write_windows_helper(current: Path, replacement: Path) -> Path:
+    helper = replacement.parent / "install-update.ps1"
+    helper.write_text(
+        "param($ProcessId, $Current, $Replacement)\n"
+        "while (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) {\n"
+        "  Start-Sleep -Milliseconds 200\n"
+        "}\n"
+        "$deadline = (Get-Date).AddSeconds(30)\n"
+        "while ($true) {\n"
+        "  try {\n"
+        "    Copy-Item -Force -LiteralPath $Replacement -Destination $Current "
+        "-ErrorAction Stop\n"
+        "    break\n"
+        "  } catch {\n"
+        "    if ((Get-Date) -ge $deadline) { throw }\n"
+        "    Start-Sleep -Milliseconds 200\n"
+        "  }\n"
+        "}\n"
+        "Start-Process -FilePath $Current\n"
+        "Remove-Item -Force -LiteralPath $Replacement\n"
+        "Remove-Item -Force -LiteralPath $MyInvocation.MyCommand.Path\n",
+        encoding="utf-8",
+    )
+    subprocess.Popen(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(helper),
+            str(os.getpid()),
+            str(current),
+            str(replacement),
+        ],
+        env=_restart_environment(),
+        creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        | getattr(subprocess, "DETACHED_PROCESS", 0),
     )
     return helper
 
@@ -211,32 +266,7 @@ def install_and_restart(download: Path) -> None:
         return
 
     if sys.platform == "win32":
-        helper = download.parent / "install-update.ps1"
-        helper.write_text(
-            "param($ProcessId, $Current, $Replacement)\n"
-            "while (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) {\n"
-            "  Start-Sleep -Milliseconds 200\n"
-            "}\n"
-            "Move-Item -Force -LiteralPath $Replacement -Destination $Current\n"
-            "Start-Process -FilePath $Current\n"
-            "Remove-Item -Force -LiteralPath $MyInvocation.MyCommand.Path\n",
-            encoding="utf-8",
-        )
-        subprocess.Popen(
-            [
-                "powershell.exe",
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                str(helper),
-                str(os.getpid()),
-                str(Path(sys.executable).resolve()),
-                str(download),
-            ],
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
-            | subprocess.DETACHED_PROCESS,
-        )
+        _write_windows_helper(Path(sys.executable).resolve(), download)
         return
     raise RuntimeError(f"Unsupported update platform: {sys.platform}")
 
