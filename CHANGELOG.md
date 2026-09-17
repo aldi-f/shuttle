@@ -5,6 +5,12 @@ All notable changes to Shuttle are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Displayed the running Shuttle version in the bottom-right corner of the window.
+
 ## [0.3.1] - 2026-09-17
 
 ### Fixed
