@@ -13,6 +13,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   and report detached installer failures instead of failing silently.
 - Added an actionable warning when macOS App Translocation prevents Shuttle from
   replacing an application launched from Downloads.
+- Stored the update installer log alongside Shuttle's saved settings.
 
 ## [0.3.2] - 2026-09-17
 

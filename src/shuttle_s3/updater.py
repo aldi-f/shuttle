@@ -165,8 +165,11 @@ def _installer_process_ids() -> tuple[int, ...]:
     return tuple(process_ids)
 
 
-def _installer_log_path() -> Path:
-    return Path(tempfile.gettempdir()) / "Shuttle-update.log"
+def _installer_log_path(directory: Path | None = None) -> Path:
+    if directory is None:
+        directory = Path(tempfile.gettempdir())
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / "Shuttle-update.log"
 
 
 def _write_unix_helper(
@@ -175,11 +178,12 @@ def _write_unix_helper(
     *,
     macos: bool,
     process_ids: tuple[int, ...] | None = None,
+    log_directory: Path | None = None,
 ) -> Path:
     directory = replacement.parent
     helper = directory / "install-update.sh"
     process_ids = process_ids or (os.getpid(),)
-    log = _installer_log_path()
+    log = _installer_log_path(log_directory)
     if macos:
         command = (
             'backup="${current}.shuttle-backup"\n'
@@ -262,10 +266,11 @@ def _write_windows_helper(
     replacement: Path,
     *,
     process_ids: tuple[int, ...] | None = None,
+    log_directory: Path | None = None,
 ) -> Path:
     helper = replacement.parent / "install-update.ps1"
     process_ids = process_ids or (os.getpid(),)
-    log = _installer_log_path()
+    log = _installer_log_path(log_directory)
     helper.write_text(
         "param($ProcessIds, $Current, $Replacement, $Log)\n"
         '$ErrorActionPreference = "Stop"\n'
@@ -340,7 +345,7 @@ def _ensure_macos_app_is_updatable(application: Path) -> None:
         )
 
 
-def install_and_restart(download: Path) -> None:
+def install_and_restart(download: Path, *, data_directory: Path | None = None) -> None:
     """Start a detached helper that replaces the frozen app after this process exits."""
     if not getattr(sys, "frozen", False):
         raise RuntimeError("Automatic installation is available only in a packaged Shuttle app")
@@ -359,6 +364,7 @@ def install_and_restart(download: Path) -> None:
             replacement_app,
             macos=True,
             process_ids=_installer_process_ids(),
+            log_directory=data_directory,
         )
         return
 
@@ -368,6 +374,7 @@ def install_and_restart(download: Path) -> None:
             download,
             macos=False,
             process_ids=_installer_process_ids(),
+            log_directory=data_directory,
         )
         return
 
@@ -376,6 +383,7 @@ def install_and_restart(download: Path) -> None:
             Path(sys.executable).resolve(),
             download,
             process_ids=_installer_process_ids(),
+            log_directory=data_directory,
         )
         return
     raise RuntimeError(f"Unsupported update platform: {sys.platform}")

@@ -198,6 +198,7 @@ def test_windows_helper_retries_until_bootloader_releases_executable(
         tmp_path / "Shuttle.exe",
         tmp_path / "Shuttle-windows-amd64.exe",
         process_ids=(123, 456),
+        log_directory=tmp_path / "settings",
     )
     script = helper.read_text(encoding="utf-8")
 
@@ -207,4 +208,5 @@ def test_windows_helper_retries_until_bootloader_releases_executable(
     assert "Shuttle update failed" in script
     assert "Move-Item" not in script
     assert popen_calls[0][0][-4] == "123,456"
+    assert popen_calls[0][0][-1] == str(tmp_path / "settings" / "Shuttle-update.log")
     assert popen_calls[0][1]["env"]["PYINSTALLER_RESET_ENVIRONMENT"] == "1"
