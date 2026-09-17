@@ -5,6 +5,16 @@ All notable changes to Shuttle are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Made packaged application updates wait for the PyInstaller bootloader to exit
+  and report detached installer failures instead of failing silently.
+- Added an actionable warning when macOS App Translocation prevents Shuttle from
+  replacing an application launched from Downloads.
+- Stored the update installer log alongside Shuttle's saved settings.
+
 ## [0.3.2] - 2026-09-17
 
 ### Added

@@ -110,7 +110,8 @@ class MainWindow(QMainWindow):
         self.background_workers: set[Worker] = set()
 
         data_root = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
-        self.job_store = JobStore(Path(data_root) / "jobs.json")
+        self.data_directory = Path(data_root)
+        self.job_store = JobStore(self.data_directory / "jobs.json")
         self.jobs: list[SavedJob] = []
 
         self._build_ui()
@@ -439,7 +440,7 @@ class MainWindow(QMainWindow):
 
         def downloaded(path: Any) -> None:
             try:
-                install_and_restart(path)
+                install_and_restart(path, data_directory=self.data_directory)
             except Exception as error:
                 self._show_error(str(error))
                 return

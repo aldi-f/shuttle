@@ -11,6 +11,8 @@ import pytest
 
 from shuttle_s3.updater import (
     UpdateClient,
+    _ensure_macos_app_is_updatable,
+    _installer_process_ids,
     _platform_asset,
     _restart_environment,
     _version_tuple,
@@ -139,6 +141,23 @@ def test_restart_environment_resets_pyinstaller_and_restores_library_path(
     assert "LD_LIBRARY_PATH_ORIG" not in environment
 
 
+def test_installer_waits_for_application_and_pyinstaller_parent(monkeypatch: Any) -> None:
+    monkeypatch.setattr("os.getpid", lambda: 123)
+    monkeypatch.setattr("os.getppid", lambda: 456)
+    monkeypatch.setenv("_PYI_APPLICATION_HOME_DIR", "/tmp/pyinstaller")
+
+    assert _installer_process_ids() == (123, 456)
+
+
+def test_macos_translocated_app_cannot_be_updated() -> None:
+    application = Path(
+        "/private/var/folders/random/AppTranslocation/ABC/d/Shuttle.app"
+    )
+
+    with pytest.raises(RuntimeError, match="Move Shuttle.app"):
+        _ensure_macos_app_is_updatable(application)
+
+
 def test_linux_helper_restarts_with_clean_environment(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
@@ -152,11 +171,18 @@ def test_linux_helper_restarts_with_clean_environment(
         tmp_path / "Shuttle",
         tmp_path / "Shuttle-linux-amd64",
         macos=False,
+        process_ids=(123, 456),
     )
 
-    assert '"$current" &' in helper.read_text(encoding="utf-8")
+    script = helper.read_text(encoding="utf-8")
+    assert '"$current" >/dev/null 2>&1 &' in script
+    assert "exec >>\"$log\" 2>&1" in script
+    assert popen_calls[0][0][1] == "123 456"
     assert popen_calls[0][1]["env"]["PYINSTALLER_RESET_ENVIRONMENT"] == "1"
     assert popen_calls[0][1]["start_new_session"] is True
+    assert popen_calls[0][1]["stdin"] is not None
+    assert popen_calls[0][1]["stdout"] is not None
+    assert popen_calls[0][1]["stderr"] is not None
 
 
 def test_windows_helper_retries_until_bootloader_releases_executable(
@@ -171,10 +197,16 @@ def test_windows_helper_retries_until_bootloader_releases_executable(
     helper = _write_windows_helper(
         tmp_path / "Shuttle.exe",
         tmp_path / "Shuttle-windows-amd64.exe",
+        process_ids=(123, 456),
+        log_directory=tmp_path / "settings",
     )
     script = helper.read_text(encoding="utf-8")
 
     assert "Copy-Item -Force" in script
-    assert "$deadline = (Get-Date).AddSeconds(30)" in script
+    assert "$deadline = (Get-Date).AddSeconds(60)" in script
+    assert "$ProcessIds.Split(',')" in script
+    assert "Shuttle update failed" in script
     assert "Move-Item" not in script
+    assert popen_calls[0][0][-4] == "123,456"
+    assert popen_calls[0][0][-1] == str(tmp_path / "settings" / "Shuttle-update.log")
     assert popen_calls[0][1]["env"]["PYINSTALLER_RESET_ENVIRONMENT"] == "1"
