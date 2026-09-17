@@ -41,8 +41,8 @@ class FakeOpener:
 def release(checksum: str) -> bytes:
     return json.dumps(
         {
-            "tag_name": "v0.2.1",
-            "html_url": "https://github.com/aldi-f/shuttle/releases/tag/v0.2.1",
+            "tag_name": "v0.2.2",
+            "html_url": "https://github.com/aldi-f/shuttle/releases/tag/v0.2.2",
             "assets": [
                 {
                     "name": "Shuttle-linux-amd64",
@@ -87,7 +87,7 @@ def test_update_check_and_verified_download(tmp_path: Any, monkeypatch: Any) -> 
 
 def test_current_release_needs_no_checksum_request() -> None:
     client = UpdateClient(FakeOpener([release("0" * 64)]))
-    assert client.check("0.2.1", system="linux", machine="amd64") is None
+    assert client.check("0.2.2", system="linux", machine="amd64") is None
 
 
 def test_download_rejects_checksum_mismatch(tmp_path: Any, monkeypatch: Any) -> None:
