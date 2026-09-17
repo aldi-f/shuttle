@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import posixpath
 import threading
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -315,6 +316,92 @@ class S3Service:
             source=source,
             destination=destination,
             mode=mode,
+            items=tuple(items),
+        )
+
+    def plan_selection(
+        self,
+        *,
+        bucket: str,
+        entries: list[RemoteEntry],
+        destination: Path,
+        overwrite: bool,
+        cancel: threading.Event | None = None,
+        on_status: PlanStatusCallback | None = None,
+    ) -> TransferPlan:
+        """Build a download plan for files and folders checked in the S3 browser."""
+        status = on_status or (lambda _message: None)
+        _check_cancel(cancel)
+        if not bucket:
+            raise ValueError("Select a bucket")
+        if not entries:
+            raise ValueError("Tick at least one file or folder")
+        destination = destination.expanduser()
+        if destination.exists() and not destination.is_dir():
+            raise ValueError("The local destination must be a folder")
+
+        selected = sorted(entries, key=lambda entry: entry.key)
+        selected_prefixes = tuple(
+            entry.key if entry.key.endswith("/") else f"{entry.key}/"
+            for entry in selected
+            if entry.is_prefix
+        )
+        selected = [
+            entry
+            for entry in selected
+            if not any(
+                entry.key != prefix and entry.key.startswith(prefix)
+                for prefix in selected_prefixes
+            )
+        ]
+        parents = [posixpath.dirname(entry.key.rstrip("/")) for entry in selected]
+        common_parent = posixpath.commonpath(parents)
+        root_prefix = f"{common_parent}/" if common_parent else ""
+
+        objects_by_key: dict[str, dict[str, Any]] = {}
+        for entry in selected:
+            _check_cancel(cancel)
+            if entry.is_prefix:
+                status(f"Listing selected folder {entry.key}…")
+                for item in self._objects(bucket, entry.key, cancel, status):
+                    if item["Key"].startswith(entry.key):
+                        objects_by_key[item["Key"]] = item
+            else:
+                objects_by_key[entry.key] = {"Key": entry.key, "Size": entry.size}
+        if not objects_by_key:
+            raise ValueError("The selected files and folders are empty")
+
+        items: list[PlanItem] = []
+        status(f"Comparing {len(objects_by_key)} selected object(s) with local files…")
+        for key, item in sorted(objects_by_key.items()):
+            _check_cancel(cancel)
+            relative = _safe_relative_path(key.removeprefix(root_prefix))
+            local_path = destination / relative
+            if local_path.exists() and not overwrite:
+                items.append(
+                    PlanItem(
+                        action="skip",
+                        path=local_path,
+                        key=key,
+                        size=int(item.get("Size", 0)),
+                        reason="Local file already exists",
+                    )
+                )
+            else:
+                items.append(
+                    PlanItem(
+                        action="download",
+                        path=local_path,
+                        key=key,
+                        size=int(item.get("Size", 0)),
+                    )
+                )
+
+        return TransferPlan(
+            bucket=bucket,
+            source=", ".join(entry.key for entry in selected),
+            destination=destination,
+            mode="download",
             items=tuple(items),
         )
 
