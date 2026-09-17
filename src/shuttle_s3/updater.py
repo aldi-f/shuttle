@@ -6,14 +6,18 @@ import os
 import platform
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import tempfile
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any
+
+import certifi
 
 REPOSITORY = "aldi-f/shuttle"
 LATEST_RELEASE_URL = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
@@ -64,8 +68,11 @@ def _platform_asset(
 class UpdateClient:
     def __init__(
         self,
-        opener: Callable[..., Any] = urllib.request.urlopen,
+        opener: Callable[..., Any] | None = None,
     ) -> None:
+        if opener is None:
+            context = ssl.create_default_context(cafile=certifi.where())
+            opener = partial(urllib.request.urlopen, context=context)
         self._opener = opener
 
     def _get(self, url: str) -> bytes:
