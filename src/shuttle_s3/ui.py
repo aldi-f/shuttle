@@ -55,6 +55,8 @@ from .s3 import (
 )
 from .updater import AvailableUpdate, UpdateClient, install_and_restart
 
+PREVIEW_LOG_ITEM_LIMIT = 250
+
 
 class WorkerSignals(QObject):
     result = Signal(object)
@@ -99,6 +101,8 @@ class MainWindow(QMainWindow):
         self.authenticated_profile_name: str | None = None
         self.current_plan: TransferPlan | None = None
         self.remote_entries: list[RemoteEntry] = []
+        self.displayed_remote_entries: list[RemoteEntry] = []
+        self.selected_remote_entries: dict[str, RemoteEntry] = {}
         self.browsed_bucket = ""
         self.browsed_prefix = ""
         self.bucket_names: list[str] = []
@@ -155,14 +159,36 @@ class MainWindow(QMainWindow):
         path_row.addWidget(self.up_button)
         path_row.addWidget(self.browse_s3_button)
         source_form.addRow("S3 path:", path_row)
+        browser_search_row = QHBoxLayout()
+        self.browser_search_edit = QLineEdit()
+        self.browser_search_edit.setPlaceholderText(
+            "Fuzzy search files and folders in the loaded folder"
+        )
+        self.browser_search_edit.setClearButtonEnabled(True)
+        self.refresh_browser_button = QPushButton("Refresh & find")
+        self.refresh_browser_button.setToolTip(
+            "Reload the current S3 folder, then apply the fuzzy search"
+        )
+        browser_search_row.addWidget(self.browser_search_edit, 1)
+        browser_search_row.addWidget(self.refresh_browser_button)
+        source_form.addRow("Find:", browser_search_row)
         layout.addLayout(source_form)
 
         self.remote_table = QTableWidget(0, 3)
-        self.remote_table.setHorizontalHeaderLabels(["Name", "Size", "Last modified"])
+        self.remote_table.setHorizontalHeaderLabels(
+            ["Select files and folders", "Size", "Last modified"]
+        )
         self.remote_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.remote_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.remote_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.remote_table.setAlternatingRowColors(True)
+        selection_row = QHBoxLayout()
+        self.selection_status = QLabel("Tick files or folders to download them together.")
+        self.clear_selection_button = QPushButton("Clear selection")
+        self.clear_selection_button.setEnabled(False)
+        selection_row.addWidget(self.selection_status, 1)
+        selection_row.addWidget(self.clear_selection_button)
+        layout.addLayout(selection_row)
 
         lower = QWidget()
         lower_layout = QVBoxLayout(lower)
@@ -207,9 +233,9 @@ class MainWindow(QMainWindow):
         self.run_button.setToolTip("Build a successful preview before running the transfer")
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.setEnabled(False)
+        action_row.addWidget(self.run_now_button)
         action_row.addStretch()
         action_row.addWidget(self.preview_button)
-        action_row.addWidget(self.run_now_button)
         action_row.addWidget(self.run_button)
         action_row.addWidget(self.cancel_button)
         lower_layout.addLayout(action_row)
@@ -245,6 +271,11 @@ class MainWindow(QMainWindow):
         self.up_button.clicked.connect(self._go_up)
         self.remote_table.cellClicked.connect(self._select_remote_entry)
         self.remote_table.cellDoubleClicked.connect(self._open_remote_entry)
+        self.remote_table.itemChanged.connect(self._remote_item_changed)
+        self.clear_selection_button.clicked.connect(self._clear_remote_selection)
+        self.browser_search_edit.textChanged.connect(self._filter_remote_entries)
+        self.browser_search_edit.returnPressed.connect(self._browse_s3)
+        self.refresh_browser_button.clicked.connect(self._browse_s3)
         self.choose_destination_button.clicked.connect(self._choose_destination)
         self.preview_button.clicked.connect(self._preview)
         self.run_now_button.clicked.connect(self._run_now)
@@ -297,6 +328,7 @@ class MainWindow(QMainWindow):
             self.sign_in_button,
             self.load_buckets_button,
             self.browse_s3_button,
+            self.refresh_browser_button,
             self.preview_button,
             self.run_now_button,
         ):
@@ -492,6 +524,10 @@ class MainWindow(QMainWindow):
     def _bucket_changed(self, _bucket: str) -> None:
         self.source_edit.clear()
         self.remote_entries = []
+        self.displayed_remote_entries = []
+        self.selected_remote_entries.clear()
+        self._update_selection_status()
+        self.browser_search_edit.clear()
         self.browsed_bucket = ""
         self.browsed_prefix = ""
         self.remote_table.clearContents()
@@ -520,10 +556,42 @@ class MainWindow(QMainWindow):
         self.remote_entries = list(entries)
         self.browsed_bucket = bucket
         self.browsed_prefix = prefix
-        self.remote_table.setRowCount(len(self.remote_entries))
-        for row, entry in enumerate(self.remote_entries):
+        self._filter_remote_entries(self.browser_search_edit.text())
+        self.auth_status.setText(f"Loaded {len(entries)} item(s)")
+
+    def _filter_remote_entries(self, query: str) -> None:
+        if not query.strip():
+            displayed = list(self.remote_entries)
+        else:
+            names = fuzzy_matches(
+                query,
+                (entry.name for entry in self.remote_entries),
+                limit=len(self.remote_entries),
+            )
+            entries_by_name: dict[str, list[RemoteEntry]] = {}
+            for entry in self.remote_entries:
+                entries_by_name.setdefault(entry.name, []).append(entry)
+            displayed = [
+                entries_by_name[name].pop(0)
+                for name in names
+                if entries_by_name.get(name)
+            ]
+        self.displayed_remote_entries = displayed
+        self._render_remote_entries()
+
+    def _render_remote_entries(self) -> None:
+        self.remote_table.blockSignals(True)
+        self.remote_table.clearContents()
+        self.remote_table.setRowCount(len(self.displayed_remote_entries))
+        for row, entry in enumerate(self.displayed_remote_entries):
             name = f"📁 {entry.name}" if entry.is_prefix else entry.name
-            self.remote_table.setItem(row, 0, QTableWidgetItem(name))
+            name_item = QTableWidgetItem(name)
+            name_item.setFlags(name_item.flags() | Qt.ItemIsUserCheckable)
+            name_item.setCheckState(
+                Qt.Checked if entry.key in self.selected_remote_entries else Qt.Unchecked
+            )
+            name_item.setData(Qt.UserRole, entry.key)
+            self.remote_table.setItem(row, 0, name_item)
             self.remote_table.setItem(
                 row, 1, QTableWidgetItem("" if entry.is_prefix else format_bytes(entry.size))
             )
@@ -533,19 +601,54 @@ class MainWindow(QMainWindow):
                 else ""
             )
             self.remote_table.setItem(row, 2, QTableWidgetItem(modified))
-        self.auth_status.setText(f"Loaded {len(entries)} item(s)")
+        self.remote_table.blockSignals(False)
 
     def _open_remote_entry(self, row: int, _column: int) -> None:
-        if row >= len(self.remote_entries):
+        if row >= len(self.displayed_remote_entries):
             return
-        entry = self.remote_entries[row]
+        entry = self.displayed_remote_entries[row]
         self.source_edit.setText(entry.key)
         if entry.is_prefix:
             self._browse_s3()
 
     def _select_remote_entry(self, row: int, _column: int) -> None:
-        if row < len(self.remote_entries):
-            self.source_edit.setText(self.remote_entries[row].key)
+        if row < len(self.displayed_remote_entries):
+            self.source_edit.setText(self.displayed_remote_entries[row].key)
+
+    def _remote_item_changed(self, item: QTableWidgetItem) -> None:
+        if item.column() != 0:
+            return
+        key = item.data(Qt.UserRole)
+        entry = next((entry for entry in self.remote_entries if entry.key == key), None)
+        if entry is None:
+            return
+        if item.checkState() == Qt.Checked:
+            self.selected_remote_entries[entry.key] = entry
+        else:
+            self.selected_remote_entries.pop(entry.key, None)
+        self._update_selection_status()
+        self._invalidate_plan()
+
+    def _clear_remote_selection(self) -> None:
+        self.selected_remote_entries.clear()
+        self.remote_table.blockSignals(True)
+        for row in range(self.remote_table.rowCount()):
+            item = self.remote_table.item(row, 0)
+            if item is not None:
+                item.setCheckState(Qt.Unchecked)
+        self.remote_table.blockSignals(False)
+        self._update_selection_status()
+        self._invalidate_plan()
+
+    def _update_selection_status(self) -> None:
+        count = len(self.selected_remote_entries)
+        if count:
+            self.selection_status.setText(
+                f"{count} item(s) selected. Checked items override the S3 path."
+            )
+        else:
+            self.selection_status.setText("Tick files or folders to download them together.")
+        self.clear_selection_button.setEnabled(bool(count))
 
     def _go_up(self) -> None:
         current = self.source_edit.text().strip().rstrip("/")
@@ -620,6 +723,10 @@ class MainWindow(QMainWindow):
         except ValueError as error:
             self._show_error(str(error))
             return
+        selected_entries = list(self.selected_remote_entries.values())
+        if selected_entries and inputs["mode"] != "download":
+            self._show_error("File picker selections can only use Download / update mode")
+            return
         self.current_plan = None
         self.run_button.setEnabled(False)
         self.log.setPlainText(
@@ -636,14 +743,7 @@ class MainWindow(QMainWindow):
             self.run_button.setEnabled(True)
             self.run_button.setToolTip("Run the transfer shown in the preview")
             self.auth_status.setText("Preview ready")
-            self.log.appendPlainText(
-                f"\nPlan: {len(plan.downloads)} download(s), "
-                f"{len(plan.skipped)} skipped, {len(plan.deletions)} deletion(s), "
-                f"{format_bytes(plan.download_bytes)} to download.\n"
-            )
-            for item in plan.items:
-                detail = item.key or str(item.path)
-                self.log.appendPlainText(f"{item.action.upper():8} {detail}")
+            self._append_plan_preview(plan)
 
         def preview_finished() -> None:
             self.progress.setRange(0, 100)
@@ -654,16 +754,55 @@ class MainWindow(QMainWindow):
                     "The preview did not complete; review the error and try again"
                 )
 
-        self._start_worker(
-            lambda signals: service.plan(
+        def build_preview(signals: WorkerSignals) -> TransferPlan:
+            def on_status(message: str) -> None:
+                signals.status.emit(f"Preview: {message}")
+
+            if selected_entries:
+                return service.plan_selection(
+                    bucket=inputs["bucket"],
+                    entries=selected_entries,
+                    destination=inputs["destination"],
+                    overwrite=inputs["overwrite"],
+                    cancel=self.cancel_event,
+                    on_status=on_status,
+                )
+            return service.plan(
                 **inputs,
                 cancel=self.cancel_event,
                 known_entries=known_entries,
-                on_status=lambda message: signals.status.emit(f"Preview: {message}"),
-            ),
+                on_status=on_status,
+            )
+
+        self._start_worker(
+            build_preview,
             show,
             preview_finished,
         )
+
+    def _append_plan_preview(self, plan: TransferPlan) -> None:
+        self.log.appendPlainText(
+            f"\nPlan: {len(plan.downloads)} download(s), "
+            f"{len(plan.skipped)} skipped, {len(plan.deletions)} deletion(s), "
+            f"{format_bytes(plan.download_bytes)} to download.\n"
+        )
+        visible_items = plan.items[:PREVIEW_LOG_ITEM_LIMIT]
+        for item in visible_items:
+            action = item.action.upper()
+            if item.key is not None:
+                self.log.appendPlainText(
+                    f"{action:8} s3://{plan.bucket}/{item.key}\n"
+                    f"         → {item.path}"
+                )
+            else:
+                self.log.appendPlainText(f"{action:8} {item.path}")
+        omitted = len(plan.items) - len(visible_items)
+        if omitted:
+            self.log.appendPlainText(
+                f"\n…{omitted} more item(s) are included in this transfer. "
+                f"Only the first {PREVIEW_LOG_ITEM_LIMIT} are displayed to keep "
+                "the preview responsive."
+            )
 
     def _run_now(self) -> None:
         service = self._require_service()
@@ -674,10 +813,47 @@ class MainWindow(QMainWindow):
         except ValueError as error:
             self._show_error(str(error))
             return
+        selected_entries = list(self.selected_remote_entries.values())
+        if selected_entries and inputs["mode"] != "download":
+            self._show_error("File picker selections can only use Download / update mode")
+            return
+        answer = QMessageBox.warning(
+            self,
+            "Run without preview?",
+            "Run now skips the review step and may begin writing files immediately.\n\n"
+            "Continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
         known_entries = self._known_browser_entries(inputs)
         self.current_plan = None
         self.log.clear()
         self.progress.setRange(0, 0)
+
+        if selected_entries:
+            self.log.setPlainText("Preparing the checked files and folders for download…\n")
+            self.auth_status.setText("Preparing selected items…")
+
+            def prepare_selection(signals: WorkerSignals) -> TransferPlan:
+                return service.plan_selection(
+                    bucket=inputs["bucket"],
+                    entries=selected_entries,
+                    destination=inputs["destination"],
+                    overwrite=inputs["overwrite"],
+                    cancel=self.cancel_event,
+                    on_status=signals.status.emit,
+                )
+
+            def selection_ready(plan: TransferPlan) -> None:
+                self.current_plan = plan
+                self.progress.setRange(0, 100)
+                self.progress.setValue(0)
+                self._run()
+
+            self._start_worker(prepare_selection, selection_ready, self._transfer_finished)
+            return
 
         if inputs["mode"] == "download":
             self.log.setPlainText(
@@ -808,6 +984,11 @@ class MainWindow(QMainWindow):
 
         name, accepted = QInputDialog.getText(self, "Save job", "Job name:")
         if not accepted or not name.strip():
+            return
+        if self.selected_remote_entries:
+            self._show_error(
+                "Checked file picker selections are temporary. Clear them before saving a job."
+            )
             return
         try:
             inputs = self._plan_inputs()

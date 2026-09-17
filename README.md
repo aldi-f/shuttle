@@ -11,12 +11,16 @@ AWS credentials are kept in memory only.
 - Discovers modern `sso_session` and legacy IAM Identity Center profiles.
 - Performs standalone OIDC device authorization in the user's default browser.
 - Reuses one in-memory Identity Center login across compatible SSO profiles.
-- Lists accessible buckets with fuzzy name matching and browses S3 prefixes.
-- Downloads an object or recursively downloads a prefix.
+- Lists accessible buckets and browses S3 prefixes with fuzzy matching for
+  bucket names and files or folders in the currently loaded folder. Browser
+  results can be refreshed from S3 without clearing the active fuzzy search.
+- Downloads an object, recursively downloads a prefix, or downloads multiple
+  files and folders checked in the S3 browser.
 - Can stream downloads immediately with **Run now**, without a complete preview.
 - Optionally overwrites existing files.
 - Mirrors a prefix, with a preview and explicit deletion confirmation.
-- Displays planning and transfer progress and supports cancellation.
+- Displays remote-to-local paths in previews, caps very large preview logs to
+  keep the interface responsive, and supports planning/transfer cancellation.
 - Saves non-secret job inputs as JSON for quick reuse.
 
 ## Development
