@@ -6,6 +6,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
+import certifi
 import pytest
 
 from shuttle_s3.updater import (
@@ -36,6 +37,29 @@ class FakeOpener:
 
     def __call__(self, _request: Any, **_kwargs: Any) -> Response:
         return Response(self.responses.pop(0))
+
+
+def test_default_opener_uses_certifi_ca_bundle(monkeypatch: Any) -> None:
+    context = object()
+    context_calls: list[str] = []
+    opener_calls: list[dict[str, Any]] = []
+
+    def create_context(*, cafile: str) -> object:
+        context_calls.append(cafile)
+        return context
+
+    def open_url(_request: Any, **kwargs: Any) -> Response:
+        opener_calls.append(kwargs)
+        return Response(b"response")
+
+    monkeypatch.setattr("shuttle_s3.updater.ssl.create_default_context", create_context)
+    monkeypatch.setattr("shuttle_s3.updater.urllib.request.urlopen", open_url)
+
+    client = UpdateClient()
+
+    assert client._get("https://example.test") == b"response"
+    assert context_calls == [certifi.where()]
+    assert opener_calls == [{"timeout": 15, "context": context}]
 
 
 def release(checksum: str) -> bytes:

@@ -5,6 +5,14 @@ All notable changes to Shuttle are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Fixed update checks failing TLS certificate verification in packaged macOS
+  applications by using a bundled CA certificate store.
+- Standardized widget sizing and menu placement across macOS, Windows, and Linux.
+
 ## [0.3.0] - 2026-09-17
 
 ### Added

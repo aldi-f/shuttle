@@ -258,6 +258,7 @@ class MainWindow(QMainWindow):
 
         exit_action = QAction("Exit", self)
         exit_action.triggered.connect(QApplication.quit)
+        self.menuBar().setNativeMenuBar(False)
         self.menuBar().addMenu("File").addAction(exit_action)
         check_updates_action = QAction("Check for updates…", self)
         check_updates_action.triggered.connect(lambda: self._check_for_updates(manual=True))
