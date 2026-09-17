@@ -256,6 +256,9 @@ class MainWindow(QMainWindow):
         layout.addWidget(splitter, 1)
         self.setCentralWidget(root)
 
+        self.version_label = QLabel(f"v{__version__}")
+        self.statusBar().addPermanentWidget(self.version_label)
+
         exit_action = QAction("Exit", self)
         exit_action.triggered.connect(QApplication.quit)
         self.menuBar().setNativeMenuBar(False)
