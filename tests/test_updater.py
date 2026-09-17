@@ -3,11 +3,19 @@ from __future__ import annotations
 import hashlib
 import json
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 import pytest
 
-from shuttle_s3.updater import UpdateClient, _platform_asset, _version_tuple
+from shuttle_s3.updater import (
+    UpdateClient,
+    _platform_asset,
+    _restart_environment,
+    _version_tuple,
+    _write_unix_helper,
+    _write_windows_helper,
+)
 
 
 class Response(BytesIO):
@@ -91,3 +99,58 @@ def test_download_rejects_checksum_mismatch(tmp_path: Any, monkeypatch: Any) -> 
 
     with pytest.raises(RuntimeError, match="SHA-256"):
         client.download(update)
+
+
+def test_restart_environment_resets_pyinstaller_and_restores_library_path(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setenv("_PYI_APPLICATION_HOME_DIR", "/tmp/old-mei")
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/tmp/old-mei")
+    monkeypatch.setenv("LD_LIBRARY_PATH_ORIG", "/usr/local/lib")
+
+    environment = _restart_environment()
+
+    assert environment["PYINSTALLER_RESET_ENVIRONMENT"] == "1"
+    assert environment["LD_LIBRARY_PATH"] == "/usr/local/lib"
+    assert "LD_LIBRARY_PATH_ORIG" not in environment
+
+
+def test_linux_helper_restarts_with_clean_environment(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    popen_calls: list[tuple[list[str], dict[str, Any]]] = []
+    monkeypatch.setattr(
+        "subprocess.Popen",
+        lambda arguments, **kwargs: popen_calls.append((arguments, kwargs)),
+    )
+
+    helper = _write_unix_helper(
+        tmp_path / "Shuttle",
+        tmp_path / "Shuttle-linux-amd64",
+        macos=False,
+    )
+
+    assert '"$current" &' in helper.read_text(encoding="utf-8")
+    assert popen_calls[0][1]["env"]["PYINSTALLER_RESET_ENVIRONMENT"] == "1"
+    assert popen_calls[0][1]["start_new_session"] is True
+
+
+def test_windows_helper_retries_until_bootloader_releases_executable(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    popen_calls: list[tuple[list[str], dict[str, Any]]] = []
+    monkeypatch.setattr(
+        "subprocess.Popen",
+        lambda arguments, **kwargs: popen_calls.append((arguments, kwargs)),
+    )
+
+    helper = _write_windows_helper(
+        tmp_path / "Shuttle.exe",
+        tmp_path / "Shuttle-windows-amd64.exe",
+    )
+    script = helper.read_text(encoding="utf-8")
+
+    assert "Copy-Item -Force" in script
+    assert "$deadline = (Get-Date).AddSeconds(30)" in script
+    assert "Move-Item" not in script
+    assert popen_calls[0][1]["env"]["PYINSTALLER_RESET_ENVIRONMENT"] == "1"
