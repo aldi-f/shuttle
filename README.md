@@ -14,9 +14,9 @@ AWS credentials are kept in memory only.
 - Lists accessible buckets and browses S3 prefixes with fuzzy matching for
   bucket names and files or folders in the currently loaded folder. Browser
   results can be refreshed from S3 without clearing the active fuzzy search.
-- Downloads an object, recursively downloads a prefix, or downloads multiple
-  files and folders checked in the S3 browser.
-- Can stream downloads immediately with **Run now**, without a complete preview.
+- Downloads files and folders checked in the S3 browser. The S3 path is used
+  only to navigate folders.
+- Can start checked downloads with **Run now**, without a separate preview.
 - Optionally overwrites existing files.
 - Mirrors a prefix, with a preview and explicit deletion confirmation.
 - Displays remote-to-local paths in previews, caps very large preview logs to
@@ -107,16 +107,15 @@ are not persisted after Shuttle exits.
 
 ## Mirror safety
 
-Mirror mode treats the selected local destination as the root of the selected S3
-prefix. Local files absent from S3 are deleted. Shuttle always creates a plan
-first, displays every deletion, and asks for confirmation immediately before
-execution. Symlinked directories are never traversed.
+Mirror mode requires exactly one checked S3 folder and treats the selected local
+destination as that folder's root. Local files absent from S3 are deleted.
+Shuttle always creates a plan first, displays every deletion, and asks for
+confirmation immediately before execution. Symlinked directories are never
+traversed.
 
 Mirror mode cannot bypass its inventory step because Shuttle must compare the
 complete remote and local file sets before deleting anything. **Run now**
-performs that safety scan and proceeds automatically. In download mode,
-**Run now** starts transferring objects as soon as the first S3 listing page
-arrives.
+performs that safety scan and proceeds automatically.
 
 ## Development commands
 

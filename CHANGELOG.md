@@ -5,6 +5,24 @@ All notable changes to Shuttle are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Added a **Select all** action for the files and folders currently shown in the
+  S3 browser.
+
+### Changed
+
+- Made the S3 path navigation-only and required checkmarks to choose download
+  sources.
+- Required exactly one checked folder for mirror transfers.
+
+### Fixed
+
+- Reset checked browser items when navigating to a different S3 folder while
+  preserving them during refreshes and fuzzy filtering in the same folder.
+
 ## [0.4.1] - 2026-09-17
 
 ### Changed
@@ -91,6 +109,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   workflows.
 - Added native packaging and release automation.
 
+[Unreleased]: https://github.com/aldi-f/shuttle/compare/v0.4.1...HEAD
 [0.4.1]: https://github.com/aldi-f/shuttle/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/aldi-f/shuttle/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/aldi-f/shuttle/compare/v0.3.1...v0.3.2
