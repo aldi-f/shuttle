@@ -60,6 +60,7 @@ from .theme import apply_theme, save_theme, saved_theme
 from .updater import AvailableUpdate, UpdateClient, install_and_restart
 
 PREVIEW_LOG_ITEM_LIMIT = 250
+BUCKET_PLACEHOLDER = "Select a bucket"
 
 
 class WorkerSignals(QObject):
@@ -147,6 +148,9 @@ class MainWindow(QMainWindow):
         bucket_row = QHBoxLayout()
         self.bucket_combo = QComboBox()
         self.bucket_combo.setEditable(True)
+        self.bucket_combo.setPlaceholderText(BUCKET_PLACEHOLDER)
+        self.bucket_combo.lineEdit().setPlaceholderText(BUCKET_PLACEHOLDER)
+        self.bucket_combo.setCurrentIndex(-1)
         self.bucket_completion_model = QStringListModel(self)
         self.bucket_completer = QCompleter(self.bucket_completion_model, self)
         self.bucket_completer.setCaseSensitivity(Qt.CaseInsensitive)
@@ -392,6 +396,7 @@ class MainWindow(QMainWindow):
             self.profile_combo,
             self.refresh_profiles_button,
             self.sign_in_button,
+            self.bucket_combo,
             self.load_buckets_button,
             self.source_edit,
             self.reload_browser_button,
@@ -520,7 +525,7 @@ class MainWindow(QMainWindow):
             return
         self.service = None
         self.authenticated_profile = None
-        self.bucket_combo.clear()
+        self._set_bucket_choices()
 
         def authenticate(signals: WorkerSignals) -> Any:
             return self.authenticator.authenticate(
@@ -548,7 +553,7 @@ class MainWindow(QMainWindow):
         self.cancel_event.set()
         self.service = None
         self.authenticated_profile = None
-        self.bucket_combo.clear()
+        self._set_bucket_choices()
         if (
             previous_profile is not None
             and next_profile is not None
@@ -577,15 +582,9 @@ class MainWindow(QMainWindow):
         service = self._require_service()
         if service is None:
             return
-        current = self.bucket_combo.currentText()
 
         def loaded(buckets: Any) -> None:
-            self.bucket_names = list(buckets)
-            self.bucket_combo.clear()
-            self.bucket_combo.addItems(self.bucket_names)
-            self._update_bucket_matches("")
-            if current and current in self.bucket_names:
-                self.bucket_combo.setCurrentText(current)
+            self._set_bucket_choices(buckets)
             self.auth_status.setText(
                 f"Signed in; {len(self.bucket_names)} accessible bucket(s)"
             )
@@ -595,13 +594,29 @@ class MainWindow(QMainWindow):
             loaded,
         )
 
+    def _set_bucket_choices(self, buckets: Any = ()) -> None:
+        self.bucket_names = list(buckets)
+        self.bucket_combo.blockSignals(True)
+        self.bucket_combo.clear()
+        self.bucket_combo.addItems(self.bucket_names)
+        self.bucket_combo.setCurrentIndex(-1)
+        self.bucket_combo.lineEdit().clear()
+        self.bucket_combo.blockSignals(False)
+        self._update_bucket_matches("")
+        self._clear_bucket_browser()
+
     def _update_bucket_matches(self, text: str) -> None:
         matches = fuzzy_matches(text, self.bucket_names)
         self.bucket_completion_model.setStringList(matches)
         if text and matches:
             self.bucket_completer.complete()
 
-    def _bucket_changed(self, _bucket: str) -> None:
+    def _bucket_changed(self, bucket: str) -> None:
+        self._clear_bucket_browser()
+        if self.service is not None and bucket.strip() in self.bucket_names:
+            self._browse_s3()
+
+    def _clear_bucket_browser(self) -> None:
         self.source_edit.clear()
         self.remote_entries = []
         self.displayed_remote_entries = []

@@ -7,6 +7,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Changed
+
+- Reset the bucket field to a selection prompt after authentication or profile
+  changes, and automatically load the S3 root when a bucket is selected.
+
 ## [0.6.0] - 2026-09-18
 
 ### Added
