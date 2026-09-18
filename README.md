@@ -88,13 +88,17 @@ and role.
 
 Packaged builds check the repository's latest GitHub Release shortly after
 startup. When a newer version is available, Shuttle offers to download the
-matching platform artifact, verifies it against the release's `SHA256SUMS`,
-then replaces the portable executable or app bundle and restarts.
+matching platform artifact and verifies it against the release's `SHA256SUMS`.
+On Windows it shows a small update progress window while running the per-user
+installer unattended; on macOS it replaces the installed app bundle; and on
+Linux it replaces the portable executable. Shuttle then restarts.
 
 The update check runs in the background and update prompts wait until active
-operations finish. Use **Help > Check for updates…** to check manually. Source
-development runs can detect releases, but only packaged PyInstaller builds can
-install an update automatically.
+operations finish. Automatic checks are enabled by default and can be toggled
+with **Settings > Automatically check for updates**. Use
+**Help > Check for updates…** to check manually even when automatic checks are
+disabled. Source development runs can detect releases, but only packaged
+PyInstaller builds can install an update automatically.
 
 Updates rely on GitHub HTTPS and release checksums; the artifacts are not yet
 code-signed.
@@ -149,17 +153,21 @@ python -m pip install -e ".[build]"
 python scripts/package_release.py
 ```
 
-PyInstaller's one-file mode is convenient for portable Windows builds but starts
-more slowly because it extracts at launch. A signed installer is recommended for
-managed distribution. macOS builds must be produced on macOS, and Windows builds
-on Windows.
+Windows builds use an Inno Setup per-user installer. It installs Shuttle under
+`%LOCALAPPDATA%\Programs\Shuttle`, registers it for uninstall, and creates Start
+menu and optional desktop shortcuts without requiring administrator access.
+macOS builds use the conventional DMG with a link to `/Applications`. Both use
+PyInstaller's directory mode, so installed apps do not unpack themselves into a
+temporary directory on every launch. macOS builds must be produced on macOS,
+and Windows builds on Windows.
 
 Pushing a tag beginning with `v`, such as `v0.1.0`, triggers the
 `Build release` GitHub Actions workflow. It runs tests, builds these native
 artifacts, and attaches them to a GitHub Release:
 
 - `Shuttle-linux-amd64`
-- `Shuttle-windows-amd64.exe`
+- `Shuttle-windows-amd64-setup.exe`
+- `Shuttle-macos-arm64.dmg`
 - `Shuttle-macos-arm64.zip`
 
 Create and push a release tag with:
@@ -169,7 +177,8 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The macOS artifacts are currently unsigned. Users may need to approve the app
-through macOS Privacy & Security until code signing and notarization are
-configured.
+The macOS DMG is the user-facing installer; its ZIP is used only by the in-app
+updater. The Windows and macOS artifacts are currently unsigned. Windows
+SmartScreen and macOS Gatekeeper may warn until platform code signing (and
+Apple notarization) are configured.
 

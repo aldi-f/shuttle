@@ -85,7 +85,7 @@ def release(checksum: str) -> bytes:
 
 def test_platform_asset_names() -> None:
     assert _platform_asset("linux", "x86_64") == "Shuttle-linux-amd64"
-    assert _platform_asset("win32", "AMD64") == "Shuttle-windows-amd64.exe"
+    assert _platform_asset("win32", "AMD64") == "Shuttle-windows-amd64-setup.exe"
     assert _platform_asset("darwin", "arm64") == "Shuttle-macos-arm64.zip"
     with pytest.raises(RuntimeError, match="Intel macOS"):
         _platform_asset("darwin", "x86_64")
@@ -185,7 +185,7 @@ def test_linux_helper_restarts_with_clean_environment(
     assert popen_calls[0][1]["stderr"] is not None
 
 
-def test_windows_helper_retries_until_bootloader_releases_executable(
+def test_windows_helper_waits_then_runs_installer_and_installed_app(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
     popen_calls: list[tuple[list[str], dict[str, Any]]] = []
@@ -195,18 +195,21 @@ def test_windows_helper_retries_until_bootloader_releases_executable(
     )
 
     helper = _write_windows_helper(
-        tmp_path / "Shuttle.exe",
-        tmp_path / "Shuttle-windows-amd64.exe",
+        tmp_path / "Shuttle-windows-amd64-setup.exe",
         process_ids=(123, 456),
         log_directory=tmp_path / "settings",
     )
     script = helper.read_text(encoding="utf-8")
 
-    assert "Copy-Item -Force" in script
-    assert "$deadline = (Get-Date).AddSeconds(60)" in script
     assert "$ProcessIds.Split(',')" in script
-    assert "Shuttle update failed" in script
-    assert "Move-Item" not in script
-    assert popen_calls[0][0][-4] == "123,456"
+    assert "System.Windows.Forms.ProgressBar" in script
+    assert "ProgressBarStyle]::Marquee" in script
+    assert 'Waiting for Shuttle to close...' in script
+    assert 'Installing Shuttle update...' in script
+    assert "Start-Process -FilePath $Installer" in script
+    assert "-PassThru -ErrorAction Stop" in script
+    assert 'Programs\\Shuttle\\Shuttle.exe' in script
+    assert "Copy-Item" not in script
+    assert popen_calls[0][0][-3] == "123,456"
     assert popen_calls[0][0][-1] == str(tmp_path / "settings" / "Shuttle-update.log")
     assert popen_calls[0][1]["env"]["PYINSTALLER_RESET_ENVIRONMENT"] == "1"

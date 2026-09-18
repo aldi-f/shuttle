@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import os
 import platform
 import shutil
@@ -28,6 +29,112 @@ def architecture_name() -> str:
     raise SystemExit(f"Unsupported build architecture: {machine}")
 
 
+def application_version() -> str:
+    return importlib.metadata.version("shuttle-s3")
+
+
+def _pyinstaller_arguments(
+    system: str,
+    build_directory: Path,
+    distribution_directory: Path,
+) -> list[str]:
+    arguments = [
+        sys.executable,
+        "-m",
+        "PyInstaller",
+        "--noconfirm",
+        "--clean",
+        "--windowed",
+        "--name",
+        "Shuttle",
+        "--specpath",
+        str(build_directory),
+        "--workpath",
+        str(build_directory / "work"),
+        "--distpath",
+        str(distribution_directory),
+        "--paths",
+        str(ROOT / "src"),
+        "--collect-data",
+        "botocore",
+    ]
+    # Installed desktop applications should keep their files on disk instead of
+    # unpacking a one-file executable into a temporary directory on every start.
+    arguments.append("--onefile" if system == "linux" else "--onedir")
+    if system == "macos":
+        arguments.extend(["--osx-bundle-identifier", "com.github.aldi-f.shuttle"])
+    arguments.append(str(ROOT / "src" / "shuttle_s3" / "__main__.py"))
+    return arguments
+
+
+def _build_windows_installer(
+    distribution_directory: Path,
+    output_directory: Path,
+    artifact_stem: str,
+) -> Path:
+    destination = output_directory / f"{artifact_stem}-setup.exe"
+    compiler = shutil.which("iscc")
+    if compiler is None:
+        default_compiler = Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)"))
+        compiler = str(default_compiler / "Inno Setup 6" / "ISCC.exe")
+    subprocess.run(
+        [
+            compiler,
+            f"/DSourceDir={distribution_directory / 'Shuttle'}",
+            f"/DOutputDir={output_directory}",
+            f"/DOutputBaseFilename={destination.stem}",
+            f"/DAppVersion={application_version()}",
+            str(ROOT / "packaging" / "windows" / "Shuttle.iss"),
+        ],
+        cwd=ROOT,
+        check=True,
+    )
+    return destination
+
+
+def _build_macos_artifacts(
+    source: Path,
+    output_directory: Path,
+    artifact_stem: str,
+) -> Path:
+    update_archive = output_directory / f"{artifact_stem}.zip"
+    installer = output_directory / f"{artifact_stem}.dmg"
+    subprocess.run(
+        [
+            "ditto",
+            "-c",
+            "-k",
+            "--sequesterRsrc",
+            "--keepParent",
+            str(source),
+            str(update_archive),
+        ],
+        check=True,
+    )
+
+    dmg_root = source.parent / "dmg"
+    shutil.rmtree(dmg_root, ignore_errors=True)
+    dmg_root.mkdir()
+    shutil.copytree(source, dmg_root / source.name, symlinks=True)
+    (dmg_root / "Applications").symlink_to("/Applications")
+    subprocess.run(
+        [
+            "hdiutil",
+            "create",
+            "-volname",
+            "Shuttle",
+            "-srcfolder",
+            str(dmg_root),
+            "-ov",
+            "-format",
+            "UDZO",
+            str(installer),
+        ],
+        check=True,
+    )
+    return installer
+
+
 def build(output_directory: Path) -> Path:
     system = platform_name()
     architecture = architecture_name()
@@ -38,37 +145,18 @@ def build(output_directory: Path) -> Path:
     output_directory.mkdir(parents=True, exist_ok=True)
 
     subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "PyInstaller",
-            "--noconfirm",
-            "--clean",
-            "--onefile",
-            "--windowed",
-            "--name",
-            "Shuttle",
-            "--specpath",
-            str(build_directory),
-            "--workpath",
-            str(build_directory / "work"),
-            "--distpath",
-            str(distribution_directory),
-            "--paths",
-            str(ROOT / "src"),
-            "--collect-data",
-            "botocore",
-            str(ROOT / "src" / "shuttle_s3" / "__main__.py"),
-        ],
+        _pyinstaller_arguments(system, build_directory, distribution_directory),
         cwd=ROOT,
         check=True,
     )
 
     artifact_stem = f"Shuttle-{system}-{architecture}"
     if system == "windows":
-        source = distribution_directory / "Shuttle.exe"
-        destination = output_directory / f"{artifact_stem}.exe"
-        shutil.copy2(source, destination)
+        destination = _build_windows_installer(
+            distribution_directory,
+            output_directory,
+            artifact_stem,
+        )
     elif system == "linux":
         source = distribution_directory / "Shuttle"
         destination = output_directory / artifact_stem
@@ -76,21 +164,7 @@ def build(output_directory: Path) -> Path:
         destination.chmod(destination.stat().st_mode | 0o111)
     else:
         source = distribution_directory / "Shuttle.app"
-        destination = output_directory / f"{artifact_stem}.zip"
-        if destination.exists():
-            destination.unlink()
-        subprocess.run(
-            [
-                "ditto",
-                "-c",
-                "-k",
-                "--sequesterRsrc",
-                "--keepParent",
-                str(source),
-                str(destination),
-            ],
-            check=True,
-        )
+        destination = _build_macos_artifacts(source, output_directory, artifact_stem)
     return destination
 
 

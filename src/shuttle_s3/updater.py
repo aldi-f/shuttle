@@ -55,7 +55,7 @@ def _platform_asset(
     if architecture is None:
         raise RuntimeError(f"Shuttle updates do not support architecture {machine!r}")
     if system.startswith("win"):
-        return f"Shuttle-windows-{architecture}.exe"
+        return f"Shuttle-windows-{architecture}-setup.exe"
     if system == "darwin":
         if architecture != "arm64":
             raise RuntimeError("Shuttle does not publish updates for Intel macOS")
@@ -262,47 +262,111 @@ def _restart_environment() -> dict[str, str]:
 
 
 def _write_windows_helper(
-    current: Path,
-    replacement: Path,
+    installer: Path,
     *,
     process_ids: tuple[int, ...] | None = None,
     log_directory: Path | None = None,
 ) -> Path:
-    helper = replacement.parent / "install-update.ps1"
+    helper = installer.parent / "install-update.ps1"
     process_ids = process_ids or (os.getpid(),)
     log = _installer_log_path(log_directory)
     helper.write_text(
-        "param($ProcessIds, $Current, $Replacement, $Log)\n"
+        "param($ProcessIds, $Installer, $Log)\n"
         '$ErrorActionPreference = "Stop"\n'
-        "try {\n"
-        '  "Starting Shuttle update at $(Get-Date)" | Set-Content -LiteralPath $Log\n'
-        "  foreach ($ApplicationProcessId in $ProcessIds.Split(',')) {\n"
-        "    while (Get-Process -Id $ApplicationProcessId "
-        "-ErrorAction SilentlyContinue) {\n"
-        "      Start-Sleep -Milliseconds 200\n"
+        '"Starting Shuttle update at $(Get-Date)" | Set-Content -LiteralPath $Log\n'
+        "Add-Type -AssemblyName System.Windows.Forms\n"
+        "Add-Type -AssemblyName System.Drawing\n"
+        "[System.Windows.Forms.Application]::EnableVisualStyles()\n"
+        "\n"
+        "$form = New-Object System.Windows.Forms.Form\n"
+        '$form.Text = "Shuttle Update"\n'
+        "$form.ClientSize = New-Object System.Drawing.Size(360, 105)\n"
+        "$form.FormBorderStyle = "
+        "[System.Windows.Forms.FormBorderStyle]::FixedDialog\n"
+        "$form.MaximizeBox = $false\n"
+        "$form.MinimizeBox = $false\n"
+        "$form.ControlBox = $false\n"
+        "$form.StartPosition = "
+        "[System.Windows.Forms.FormStartPosition]::CenterScreen\n"
+        "$form.TopMost = $true\n"
+        "\n"
+        "$status = New-Object System.Windows.Forms.Label\n"
+        "$status.AutoSize = $false\n"
+        "$status.Location = New-Object System.Drawing.Point(20, 18)\n"
+        "$status.Size = New-Object System.Drawing.Size(320, 24)\n"
+        '$status.Text = "Waiting for Shuttle to close..."\n'
+        "$form.Controls.Add($status)\n"
+        "\n"
+        "$progress = New-Object System.Windows.Forms.ProgressBar\n"
+        "$progress.Location = New-Object System.Drawing.Point(20, 52)\n"
+        "$progress.Size = New-Object System.Drawing.Size(320, 22)\n"
+        "$progress.Style = [System.Windows.Forms.ProgressBarStyle]::Marquee\n"
+        "$progress.MarqueeAnimationSpeed = 25\n"
+        "$form.Controls.Add($progress)\n"
+        "\n"
+        "$arguments = @(\n"
+        '  "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"\n'
+        ")\n"
+        '$installed = Join-Path $env:LOCALAPPDATA "Programs\\Shuttle\\Shuttle.exe"\n'
+        '$state = @{ Phase = "waiting"; InstallerProcess = $null; '
+        "ProcessIds = $ProcessIds.Split(',') }\n"
+        "$timer = New-Object System.Windows.Forms.Timer\n"
+        "$timer.Interval = 200\n"
+        "$timer.Add_Tick({\n"
+        '  if ($state.Phase -eq "waiting") {\n'
+        "    $applicationRunning = $false\n"
+        "    foreach ($ApplicationProcessId in $state.ProcessIds) {\n"
+        "      if (Get-Process -Id $ApplicationProcessId -ErrorAction SilentlyContinue) {\n"
+        "        $applicationRunning = $true\n"
+        "        break\n"
+        "      }\n"
         "    }\n"
-        "  }\n"
-        "  $deadline = (Get-Date).AddSeconds(60)\n"
-        "  while ($true) {\n"
-        "    try {\n"
-        "      Copy-Item -Force -LiteralPath $Replacement -Destination $Current\n"
-        "      break\n"
-        "    } catch {\n"
-        "      if ((Get-Date) -ge $deadline) { throw }\n"
-        "      Start-Sleep -Milliseconds 200\n"
+        "    if (-not $applicationRunning) {\n"
+        '      $state.Phase = "installing"\n'
+        '      $status.Text = "Installing Shuttle update..."\n'
+        "      try {\n"
+        "        $state.InstallerProcess = Start-Process -FilePath $Installer "
+        "-ArgumentList $arguments -PassThru -ErrorAction Stop\n"
+        "      } catch {\n"
+        "        $timer.Stop()\n"
+        "        $_ | Out-String | Add-Content -LiteralPath $Log\n"
+        "        [System.Windows.Forms.MessageBox]::Show(\n"
+        '          "Could not start the Shuttle installer. See the installer log at:'
+        '`n$Log",\n'
+        '          "Shuttle Update",\n'
+        "          [System.Windows.Forms.MessageBoxButtons]::OK,\n"
+        "          [System.Windows.Forms.MessageBoxIcon]::Error\n"
+        "        )\n"
+        "        $form.Close()\n"
+        "      }\n"
         "    }\n"
+        '  } elseif ($state.Phase -eq "installing" -and '
+        "$state.InstallerProcess.HasExited) {\n"
+        "    $timer.Stop()\n"
+        "    if ($state.InstallerProcess.ExitCode -eq 0) {\n"
+        '      $status.Text = "Starting Shuttle..."\n'
+        "      $form.Refresh()\n"
+        "      Start-Process -FilePath $installed\n"
+        '      "Shuttle update completed successfully." | Add-Content -LiteralPath $Log\n'
+        "    } else {\n"
+        '      "Installer exit code: $($state.InstallerProcess.ExitCode)" '
+        "| Add-Content -LiteralPath $Log\n"
+        "      [System.Windows.Forms.MessageBox]::Show(\n"
+        '        "The Shuttle installer exited with code '
+        '$($state.InstallerProcess.ExitCode). See the installer log at:`n$Log",\n'
+        '        "Shuttle Update",\n'
+        "        [System.Windows.Forms.MessageBoxButtons]::OK,\n"
+        "        [System.Windows.Forms.MessageBoxIcon]::Error\n"
+        "      )\n"
+        "    }\n"
+        "    $form.Close()\n"
         "  }\n"
-        "  Start-Process -FilePath $Current\n"
-        '  "Shuttle update completed successfully." | Add-Content -LiteralPath $Log\n'
-        "  Remove-Item -Force -LiteralPath $Replacement\n"
-        "  Remove-Item -Force -LiteralPath $MyInvocation.MyCommand.Path\n"
-        "} catch {\n"
-        "  $_ | Out-String | Add-Content -LiteralPath $Log\n"
-        "  Add-Type -AssemblyName PresentationFramework\n"
-        "  [System.Windows.MessageBox]::Show("
-        '"The update could not be installed. See the installer log at:`n$Log", '
-        '"Shuttle update failed")\n'
-        "}\n",
+        "})\n"
+        "$form.Add_Shown({ $timer.Start() })\n"
+        "[System.Windows.Forms.Application]::Run($form)\n"
+        "Remove-Item -Force -LiteralPath $Installer -ErrorAction SilentlyContinue\n"
+        "Remove-Item -Force -LiteralPath $MyInvocation.MyCommand.Path "
+        "-ErrorAction SilentlyContinue\n",
         encoding="utf-8",
     )
     subprocess.Popen(
@@ -314,8 +378,7 @@ def _write_windows_helper(
             "-File",
             str(helper),
             ",".join(str(process_id) for process_id in process_ids),
-            str(current),
-            str(replacement),
+            str(installer),
             str(log),
         ],
         env=_restart_environment(),
@@ -380,7 +443,6 @@ def install_and_restart(download: Path, *, data_directory: Path | None = None) -
 
     if sys.platform == "win32":
         _write_windows_helper(
-            Path(sys.executable).resolve(),
             download,
             process_ids=_installer_process_ids(),
             log_directory=data_directory,

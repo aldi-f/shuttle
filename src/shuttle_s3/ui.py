@@ -9,6 +9,7 @@ from typing import Any
 from PySide6.QtCore import (
     QObject,
     QRunnable,
+    QSettings,
     QStandardPaths,
     QStringListModel,
     Qt,
@@ -117,6 +118,7 @@ class MainWindow(QMainWindow):
         self.bucket_names: list[str] = []
         self.update_client = UpdateClient()
         self.background_workers: set[Worker] = set()
+        self.settings = QSettings()
 
         self.job_store = JobStore(self.data_directory / "jobs.json")
         self.jobs: list[SavedJob] = []
@@ -124,7 +126,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._load_profiles()
         self._load_jobs()
-        QTimer.singleShot(1500, self._check_for_updates)
+        QTimer.singleShot(1500, self._automatic_update_check)
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -293,6 +295,17 @@ class MainWindow(QMainWindow):
         self.menuBar().setNativeMenuBar(False)
         self.menuBar().addMenu("File").addAction(exit_action)
         settings_menu = self.menuBar().addMenu("Settings")
+        self.automatic_updates_action = QAction("Automatically check for updates", self)
+        self.automatic_updates_action.setCheckable(True)
+        self.automatic_updates_action.setChecked(
+            self.settings.value("updates/automaticCheck", True, type=bool)
+        )
+        self.automatic_updates_action.toggled.connect(
+            lambda enabled: self.settings.setValue("updates/automaticCheck", enabled)
+        )
+        settings_menu.addAction(self.automatic_updates_action)
+        settings_menu.addSeparator()
+
         theme_menu = settings_menu.addMenu("Theme")
         self.theme_action_group = QActionGroup(self)
         self.theme_action_group.setExclusive(True)
@@ -463,6 +476,10 @@ class MainWindow(QMainWindow):
             lambda active_worker=worker: self.background_workers.discard(active_worker)
         )
         self.thread_pool.start(worker)
+
+    def _automatic_update_check(self) -> None:
+        if self.automatic_updates_action.isChecked():
+            self._check_for_updates()
 
     def _check_for_updates(self, *, manual: bool = False) -> None:
         if self.background_workers:
