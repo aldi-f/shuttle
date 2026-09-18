@@ -2,21 +2,28 @@
 
 Shuttle is a cross-platform desktop application for people who need to browse,
 download, and mirror Amazon S3 folders without using the AWS CLI. It reads AWS
-IAM Identity Center profiles from the standard AWS config file and performs a
-fresh browser-based sign-in for every application session. Tokens and temporary
-AWS credentials are kept in memory only.
+IAM Identity Center profiles from the standard AWS config file. Identity Center
+sessions are reused until they expire, while temporary AWS credentials remain
+in memory only.
 
 ## Current features
 
 - Discovers modern `sso_session` and legacy IAM Identity Center profiles.
 - Performs standalone OIDC device authorization in the user's default browser.
-- Reuses one in-memory Identity Center login across compatible SSO profiles.
-- Lists accessible buckets with fuzzy name matching and browses S3 prefixes.
-- Downloads an object or recursively downloads a prefix.
-- Can stream downloads immediately with **Run now**, without a complete preview.
+- Persists Identity Center login tokens until expiry and reuses them across
+  compatible SSO profiles.
+- Lists accessible buckets and browses S3 prefixes with fuzzy matching for
+  bucket names and files or folders in the currently loaded folder. Browser
+  results can be refreshed from S3 without clearing the active fuzzy search.
+- Downloads files and folders checked in the S3 browser. The S3 path is used
+  only to navigate folders.
+- Can start checked downloads with **Run now**, without a separate preview.
 - Optionally overwrites existing files.
 - Mirrors a prefix, with a preview and explicit deletion confirmation.
-- Displays planning and transfer progress and supports cancellation.
+- Displays remote-to-local paths in previews, caps very large preview logs to
+  keep the interface responsive, and supports planning/transfer cancellation.
+- Uses a high-contrast light theme by default, with dark and automatic system
+  theme options under **Settings > Theme**.
 - Saves non-secret job inputs as JSON for quick reuse.
 
 ## Development
@@ -66,14 +73,16 @@ sso_region = eu-west-1
 sso_registration_scopes = sso:account:access
 ```
 
-The AWS CLI does not need to be installed and Shuttle does not use its SSO token
+The AWS CLI does not need to be installed and Shuttle uses a separate SSO token
 cache. The profile itself must already exist because it identifies the company's
 start URL, account, role, and regions.
 
 Profiles with the same IAM Identity Center start URL and SSO region share one
-in-memory browser login. Shuttle still requests separate temporary AWS
-credentials for each profile's account and role. The shared login is forgotten
-when Shuttle closes and is never written to disk.
+browser login. Shuttle stores that login token in the user's app-data directory
+until its server-provided expiry, then removes it. On Linux and macOS the cache
+file is created with user-only permissions. Temporary AWS credentials are never
+persisted, and Shuttle still requests them separately for each profile's account
+and role.
 
 ## Updates
 
@@ -102,21 +111,23 @@ Saved jobs contain non-secret inputs and options only. They are stored in:
 - Windows: `%APPDATA%\Shuttle\Shuttle\jobs.json`
 - macOS: `~/Library/Application Support/Shuttle/Shuttle/jobs.json`
 
+The expiry-bound Identity Center token cache is stored as `sso-session.json` in
+the same platform-specific directory.
+
 Transfer activity logs are currently kept in the application window only and
 are not persisted after Shuttle exits.
 
 ## Mirror safety
 
-Mirror mode treats the selected local destination as the root of the selected S3
-prefix. Local files absent from S3 are deleted. Shuttle always creates a plan
-first, displays every deletion, and asks for confirmation immediately before
-execution. Symlinked directories are never traversed.
+Mirror mode requires exactly one checked S3 folder and treats the selected local
+destination as that folder's root. Local files absent from S3 are deleted.
+Shuttle always creates a plan first, displays every deletion, and asks for
+confirmation immediately before execution. Symlinked directories are never
+traversed.
 
 Mirror mode cannot bypass its inventory step because Shuttle must compare the
 complete remote and local file sets before deleting anything. **Run now**
-performs that safety scan and proceeds automatically. In download mode,
-**Run now** starts transferring objects as soon as the first S3 listing page
-arrives.
+performs that safety scan and proceeds automatically.
 
 ## Development commands
 

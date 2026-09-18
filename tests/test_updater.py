@@ -6,10 +6,13 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
+import certifi
 import pytest
 
 from shuttle_s3.updater import (
     UpdateClient,
+    _ensure_macos_app_is_updatable,
+    _installer_process_ids,
     _platform_asset,
     _restart_environment,
     _version_tuple,
@@ -36,6 +39,29 @@ class FakeOpener:
 
     def __call__(self, _request: Any, **_kwargs: Any) -> Response:
         return Response(self.responses.pop(0))
+
+
+def test_default_opener_uses_certifi_ca_bundle(monkeypatch: Any) -> None:
+    context = object()
+    context_calls: list[str] = []
+    opener_calls: list[dict[str, Any]] = []
+
+    def create_context(*, cafile: str) -> object:
+        context_calls.append(cafile)
+        return context
+
+    def open_url(_request: Any, **kwargs: Any) -> Response:
+        opener_calls.append(kwargs)
+        return Response(b"response")
+
+    monkeypatch.setattr("shuttle_s3.updater.ssl.create_default_context", create_context)
+    monkeypatch.setattr("shuttle_s3.updater.urllib.request.urlopen", open_url)
+
+    client = UpdateClient()
+
+    assert client._get("https://example.test") == b"response"
+    assert context_calls == [certifi.where()]
+    assert opener_calls == [{"timeout": 15, "context": context}]
 
 
 def release(checksum: str) -> bytes:
@@ -115,6 +141,23 @@ def test_restart_environment_resets_pyinstaller_and_restores_library_path(
     assert "LD_LIBRARY_PATH_ORIG" not in environment
 
 
+def test_installer_waits_for_application_and_pyinstaller_parent(monkeypatch: Any) -> None:
+    monkeypatch.setattr("os.getpid", lambda: 123)
+    monkeypatch.setattr("os.getppid", lambda: 456)
+    monkeypatch.setenv("_PYI_APPLICATION_HOME_DIR", "/tmp/pyinstaller")
+
+    assert _installer_process_ids() == (123, 456)
+
+
+def test_macos_translocated_app_cannot_be_updated() -> None:
+    application = Path(
+        "/private/var/folders/random/AppTranslocation/ABC/d/Shuttle.app"
+    )
+
+    with pytest.raises(RuntimeError, match="Move Shuttle.app"):
+        _ensure_macos_app_is_updatable(application)
+
+
 def test_linux_helper_restarts_with_clean_environment(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
@@ -128,11 +171,18 @@ def test_linux_helper_restarts_with_clean_environment(
         tmp_path / "Shuttle",
         tmp_path / "Shuttle-linux-amd64",
         macos=False,
+        process_ids=(123, 456),
     )
 
-    assert '"$current" &' in helper.read_text(encoding="utf-8")
+    script = helper.read_text(encoding="utf-8")
+    assert '"$current" >/dev/null 2>&1 &' in script
+    assert "exec >>\"$log\" 2>&1" in script
+    assert popen_calls[0][0][1] == "123 456"
     assert popen_calls[0][1]["env"]["PYINSTALLER_RESET_ENVIRONMENT"] == "1"
     assert popen_calls[0][1]["start_new_session"] is True
+    assert popen_calls[0][1]["stdin"] is not None
+    assert popen_calls[0][1]["stdout"] is not None
+    assert popen_calls[0][1]["stderr"] is not None
 
 
 def test_windows_helper_waits_then_runs_installer_and_installed_app(
@@ -146,10 +196,12 @@ def test_windows_helper_waits_then_runs_installer_and_installed_app(
 
     helper = _write_windows_helper(
         tmp_path / "Shuttle-windows-amd64-setup.exe",
+        process_ids=(123, 456),
+        log_directory=tmp_path / "settings",
     )
     script = helper.read_text(encoding="utf-8")
 
-    assert "Get-Process -Id $ProcessId" in script
+    assert "$ProcessIds.Split(',')" in script
     assert "System.Windows.Forms.ProgressBar" in script
     assert "ProgressBarStyle]::Marquee" in script
     assert 'Waiting for Shuttle to close...' in script
@@ -158,4 +210,6 @@ def test_windows_helper_waits_then_runs_installer_and_installed_app(
     assert "-PassThru -ErrorAction Stop" in script
     assert 'Programs\\Shuttle\\Shuttle.exe' in script
     assert "Copy-Item" not in script
+    assert popen_calls[0][0][-3] == "123,456"
+    assert popen_calls[0][0][-1] == str(tmp_path / "settings" / "Shuttle-update.log")
     assert popen_calls[0][1]["env"]["PYINSTALLER_RESET_ENVIRONMENT"] == "1"

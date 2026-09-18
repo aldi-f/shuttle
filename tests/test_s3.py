@@ -215,6 +215,69 @@ def test_preview_reuses_complete_browser_listing(tmp_path: Path) -> None:
     assert plan.downloads[0].key == "reports/one.csv"
 
 
+def test_plan_selection_combines_checked_file_and_folder(tmp_path: Path) -> None:
+    service = S3Service(
+        FakeClient(
+            {
+                "reports/one.csv": b"one",
+                "reports/archive/two.csv": b"two",
+                "reports/not-selected.csv": b"other",
+            }
+        )
+    )
+
+    plan = service.plan_selection(
+        bucket="data",
+        entries=[
+            RemoteEntry(
+                key="reports/one.csv",
+                name="one.csv",
+                is_prefix=False,
+                size=3,
+            ),
+            RemoteEntry(
+                key="reports/archive/",
+                name="archive",
+                is_prefix=True,
+            ),
+        ],
+        destination=tmp_path,
+        overwrite=False,
+    )
+
+    assert {item.key for item in plan.downloads} == {
+        "reports/one.csv",
+        "reports/archive/two.csv",
+    }
+    assert {item.path.relative_to(tmp_path) for item in plan.downloads} == {
+        Path("one.csv"),
+        Path("archive/two.csv"),
+    }
+
+
+def test_plan_selection_ignores_child_already_covered_by_checked_folder(
+    tmp_path: Path,
+) -> None:
+    service = S3Service(FakeClient({"reports/archive/two.csv": b"two"}))
+
+    plan = service.plan_selection(
+        bucket="data",
+        entries=[
+            RemoteEntry(key="reports/", name="reports", is_prefix=True),
+            RemoteEntry(
+                key="reports/archive/",
+                name="archive",
+                is_prefix=True,
+            ),
+        ],
+        destination=tmp_path,
+        overwrite=False,
+    )
+
+    assert [item.key for item in plan.downloads] == ["reports/archive/two.csv"]
+    assert plan.downloads[0].path == tmp_path / "reports/archive/two.csv"
+
+
 def test_timestamp_folder_with_colons_is_valid_on_posix() -> None:
     key = "2025-12-13T03:11:07/document.pdf"
     assert _safe_relative_path(key, windows=False) == Path(key)

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from shuttle_s3.profiles import ProfileError, load_sso_profiles
+from shuttle_s3.profiles import ProfileError, SsoProfile, load_sso_profiles
 
 
 def write_config(tmp_path: Path, content: str) -> Path:
@@ -67,4 +67,25 @@ sso_account_id = 123456789012
     )
     with pytest.raises(ProfileError, match="sso_start_url"):
         load_sso_profiles(path)
+
+
+def test_session_key_is_shared_across_roles() -> None:
+    first = SsoProfile(
+        name="reader",
+        start_url="https://example.awsapps.com/start",
+        sso_region="eu-west-1",
+        account_id="123456789012",
+        role_name="Reader",
+        region="eu-west-1",
+    )
+    second = SsoProfile(
+        name="analyst",
+        start_url=first.start_url,
+        sso_region=first.sso_region,
+        account_id=first.account_id,
+        role_name="Analyst",
+        region=first.region,
+    )
+
+    assert first.session_key == second.session_key
 
