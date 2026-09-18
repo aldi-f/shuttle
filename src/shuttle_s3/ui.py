@@ -100,9 +100,13 @@ class MainWindow(QMainWindow):
         self.active_workers: set[Worker] = set()
         self.cancel_event = threading.Event()
         self.profiles: dict[str, SsoProfile] = {}
-        self.authenticator = SsoAuthenticator()
+        data_root = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
+        self.data_directory = Path(data_root)
+        self.authenticator = SsoAuthenticator(
+            token_cache_path=self.data_directory / "sso-session.json"
+        )
         self.service: S3Service | None = None
-        self.authenticated_profile_name: str | None = None
+        self.authenticated_profile: SsoProfile | None = None
         self.current_plan: TransferPlan | None = None
         self.remote_entries: list[RemoteEntry] = []
         self.displayed_remote_entries: list[RemoteEntry] = []
@@ -113,8 +117,6 @@ class MainWindow(QMainWindow):
         self.update_client = UpdateClient()
         self.background_workers: set[Worker] = set()
 
-        data_root = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
-        self.data_directory = Path(data_root)
         self.job_store = JobStore(self.data_directory / "jobs.json")
         self.jobs: list[SavedJob] = []
 
@@ -356,14 +358,24 @@ class MainWindow(QMainWindow):
             self._show_error(str(error))
             return
         self.profiles = {profile.name: profile for profile in profiles}
+        self.profile_combo.blockSignals(True)
         self.profile_combo.clear()
         self.profile_combo.addItems(self.profiles)
         if selected in self.profiles:
             self.profile_combo.setCurrentText(selected)
+        self.profile_combo.blockSignals(False)
         if not profiles:
             self.auth_status.setText("No IAM Identity Center profiles found in ~/.aws/config")
         else:
             self.auth_status.setText(f"Found {len(profiles)} profile(s); not signed in")
+            selected_profile = self.profiles.get(self.profile_combo.currentText())
+            if (
+                self.service is None
+                and selected_profile is not None
+                and self.authenticator.has_session(selected_profile)
+            ):
+                self.auth_status.setText("Restoring IAM Identity Center session…")
+                QTimer.singleShot(0, self._sign_in)
 
     def _load_jobs(self) -> None:
         self.jobs = self.job_store.load()
@@ -507,7 +519,7 @@ class MainWindow(QMainWindow):
             self._show_error("Select an IAM Identity Center profile")
             return
         self.service = None
-        self.authenticated_profile_name = None
+        self.authenticated_profile = None
         self.bucket_combo.clear()
 
         def authenticate(signals: WorkerSignals) -> Any:
@@ -520,22 +532,32 @@ class MainWindow(QMainWindow):
 
         def signed_in(authenticated: Any) -> None:
             self.service = S3Service(authenticated.boto_session.client("s3"))
-            self.authenticated_profile_name = profile.name
-            self.auth_status.setText(f"Signed in as {profile.name}")
-            self.auth_status.setText(
-                f"Signed in as {profile.name}. Select “Load buckets” to continue."
-            )
+            self.authenticated_profile = profile
+            self.auth_status.setText(f"Signed in as {profile.name}; loading buckets…")
+            self._load_buckets()
 
         self._start_worker(authenticate, signed_in)
 
     def _profile_changed(self, profile_name: str) -> None:
-        if self.service is None or profile_name == self.authenticated_profile_name:
+        previous_profile = self.authenticated_profile
+        if self.service is None or (
+            previous_profile is not None and profile_name == previous_profile.name
+        ):
             return
+        next_profile = self.profiles.get(profile_name)
         self.cancel_event.set()
         self.service = None
-        self.authenticated_profile_name = None
+        self.authenticated_profile = None
         self.bucket_combo.clear()
-        self.auth_status.setText("Profile changed; sign in to continue")
+        if (
+            previous_profile is not None
+            and next_profile is not None
+            and previous_profile.session_key == next_profile.session_key
+        ):
+            self.auth_status.setText("Profile changed; reusing Identity Center sign-in…")
+            self._sign_in()
+        else:
+            self.auth_status.setText("Profile changed; sign in to continue")
 
     def _show_device(self, device: DeviceAuthorization) -> None:
         QMessageBox.information(
@@ -543,7 +565,7 @@ class MainWindow(QMainWindow):
             "Complete sign-in",
             "Your browser has been opened for IAM Identity Center sign-in.\n\n"
             f"If requested, enter code: {device.user_code}\n\n"
-            "Shuttle keeps this session in memory only.",
+            "Shuttle stores this session in your user app-data folder until it expires.",
         )
 
     def _require_service(self) -> S3Service | None:
@@ -1100,6 +1122,6 @@ class MainWindow(QMainWindow):
         self.cancel_event.set()
         self.authenticator.clear()
         self.service = None
-        self.authenticated_profile_name = None
+        self.authenticated_profile = None
         event.accept()
 

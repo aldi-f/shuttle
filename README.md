@@ -2,15 +2,16 @@
 
 Shuttle is a cross-platform desktop application for people who need to browse,
 download, and mirror Amazon S3 folders without using the AWS CLI. It reads AWS
-IAM Identity Center profiles from the standard AWS config file and performs a
-fresh browser-based sign-in for every application session. Tokens and temporary
-AWS credentials are kept in memory only.
+IAM Identity Center profiles from the standard AWS config file. Identity Center
+sessions are reused until they expire, while temporary AWS credentials remain
+in memory only.
 
 ## Current features
 
 - Discovers modern `sso_session` and legacy IAM Identity Center profiles.
 - Performs standalone OIDC device authorization in the user's default browser.
-- Reuses one in-memory Identity Center login across compatible SSO profiles.
+- Persists Identity Center login tokens until expiry and reuses them across
+  compatible SSO profiles.
 - Lists accessible buckets and browses S3 prefixes with fuzzy matching for
   bucket names and files or folders in the currently loaded folder. Browser
   results can be refreshed from S3 without clearing the active fuzzy search.
@@ -72,14 +73,16 @@ sso_region = eu-west-1
 sso_registration_scopes = sso:account:access
 ```
 
-The AWS CLI does not need to be installed and Shuttle does not use its SSO token
+The AWS CLI does not need to be installed and Shuttle uses a separate SSO token
 cache. The profile itself must already exist because it identifies the company's
 start URL, account, role, and regions.
 
 Profiles with the same IAM Identity Center start URL and SSO region share one
-in-memory browser login. Shuttle still requests separate temporary AWS
-credentials for each profile's account and role. The shared login is forgotten
-when Shuttle closes and is never written to disk.
+browser login. Shuttle stores that login token in the user's app-data directory
+until its server-provided expiry, then removes it. On Linux and macOS the cache
+file is created with user-only permissions. Temporary AWS credentials are never
+persisted, and Shuttle still requests them separately for each profile's account
+and role.
 
 ## Updates
 
@@ -103,6 +106,9 @@ Saved jobs contain non-secret inputs and options only. They are stored in:
 - Linux: `~/.local/share/Shuttle/Shuttle/jobs.json`
 - Windows: `%APPDATA%\Shuttle\Shuttle\jobs.json`
 - macOS: `~/Library/Application Support/Shuttle/Shuttle/jobs.json`
+
+The expiry-bound Identity Center token cache is stored as `sso-session.json` in
+the same platform-specific directory.
 
 Transfer activity logs are currently kept in the application window only and
 are not persisted after Shuttle exits.

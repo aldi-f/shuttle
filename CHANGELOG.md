@@ -7,6 +7,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- Persist IAM Identity Center login tokens until expiry, restore valid sessions
+  when Shuttle starts, and automatically load buckets after authentication.
+
 ## [0.5.0] - 2026-09-18
 
 ### Added
