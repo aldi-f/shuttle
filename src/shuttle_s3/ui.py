@@ -16,7 +16,7 @@ from PySide6.QtCore import (
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -56,6 +56,7 @@ from .s3 import (
     TransferPlan,
     format_bytes,
 )
+from .theme import apply_theme, save_theme, saved_theme
 from .updater import AvailableUpdate, UpdateClient, install_and_restart
 
 PREVIEW_LOG_ITEM_LIMIT = 250
@@ -285,6 +286,24 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(QApplication.quit)
         self.menuBar().setNativeMenuBar(False)
         self.menuBar().addMenu("File").addAction(exit_action)
+        settings_menu = self.menuBar().addMenu("Settings")
+        theme_menu = settings_menu.addMenu("Theme")
+        self.theme_action_group = QActionGroup(self)
+        self.theme_action_group.setExclusive(True)
+        current_theme = saved_theme()
+        for label, theme in (
+            ("Light", "light"),
+            ("Dark", "dark"),
+            ("Auto (system)", "auto"),
+        ):
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.setChecked(theme == current_theme)
+            action.triggered.connect(
+                lambda _checked=False, selected=theme: self._set_theme(selected)
+            )
+            self.theme_action_group.addAction(action)
+            theme_menu.addAction(action)
         check_updates_action = QAction("Check for updates…", self)
         check_updates_action.triggered.connect(lambda: self._check_for_updates(manual=True))
         self.menuBar().addMenu("Help").addAction(check_updates_action)
@@ -320,6 +339,14 @@ class MainWindow(QMainWindow):
         self.overwrite_check.toggled.connect(self._invalidate_plan)
         self.overwrite_check.toggled.connect(self._update_option_help)
         self._update_option_help()
+
+    def _set_theme(self, theme: str) -> None:
+        save_theme(theme)
+        apply_theme(QApplication.instance(), theme)
+        self.up_button.setIcon(self.style().standardIcon(QStyle.SP_ArrowUp))
+        self.reload_browser_button.setIcon(
+            self.style().standardIcon(QStyle.SP_BrowserReload)
+        )
 
     def _load_profiles(self) -> None:
         selected = self.profile_combo.currentText()
