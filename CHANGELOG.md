@@ -14,6 +14,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Reload the current S3 folder after the Find field has been idle for one second,
+  while continuing to filter already loaded entries immediately.
 - Integrated S3 navigation, folder contents, selection controls, and search into
   one Explorer-style browse panel with up and reload icon actions.
 - Made the S3 path navigation-only and required checkmarks to choose download

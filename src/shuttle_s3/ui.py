@@ -205,6 +205,9 @@ class MainWindow(QMainWindow):
             "Fuzzy search files and folders in the loaded folder"
         )
         self.browser_search_edit.setClearButtonEnabled(True)
+        self.browser_search_timer = QTimer(self)
+        self.browser_search_timer.setInterval(1000)
+        self.browser_search_timer.setSingleShot(True)
         browser_search_row.addWidget(QLabel("Find:"))
         browser_search_row.addWidget(self.browser_search_edit, 1)
         browser_layout.addLayout(browser_search_row)
@@ -297,7 +300,8 @@ class MainWindow(QMainWindow):
         self.remote_table.itemChanged.connect(self._remote_item_changed)
         self.select_all_button.clicked.connect(self._select_all_remote_entries)
         self.clear_selection_button.clicked.connect(self._clear_remote_selection)
-        self.browser_search_edit.textChanged.connect(self._filter_remote_entries)
+        self.browser_search_edit.textChanged.connect(self._browser_search_changed)
+        self.browser_search_timer.timeout.connect(self._browse_s3)
         self.choose_destination_button.clicked.connect(self._choose_destination)
         self.preview_button.clicked.connect(self._preview)
         self.run_now_button.clicked.connect(self._run_now)
@@ -352,10 +356,13 @@ class MainWindow(QMainWindow):
             self.load_buckets_button,
             self.source_edit,
             self.reload_browser_button,
+            self.browser_search_edit,
             self.preview_button,
             self.run_now_button,
         ):
             widget.setEnabled(not busy)
+        if busy:
+            self.browser_search_timer.stop()
         self.up_button.setEnabled(not busy and bool(self.source_edit.text().strip("/")))
         if busy:
             self.run_button.setEnabled(False)
@@ -552,6 +559,7 @@ class MainWindow(QMainWindow):
         self.selected_remote_entries.clear()
         self._update_selection_status()
         self.browser_search_edit.clear()
+        self.browser_search_timer.stop()
         self.browsed_bucket = ""
         self.browsed_prefix = ""
         self.remote_table.clearContents()
@@ -604,6 +612,11 @@ class MainWindow(QMainWindow):
             ]
         self.displayed_remote_entries = displayed
         self._render_remote_entries()
+
+    def _browser_search_changed(self, query: str) -> None:
+        self._filter_remote_entries(query)
+        if self.service is not None and self.bucket_combo.currentText().strip():
+            self.browser_search_timer.start()
 
     def _render_remote_entries(self) -> None:
         self.remote_table.blockSignals(True)
