@@ -7,6 +7,24 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-18
+
+### Added
+
+- Added a per-user Windows installer with Start menu integration and registered
+  uninstallation.
+- Added a conventional macOS DMG for installing Shuttle in `/Applications`.
+- Added a persistent **Settings > Automatically check for updates** toggle.
+- Added a small Windows update progress window with installation status and
+  actionable failure messages.
+
+### Changed
+
+- Windows updates now run the verified installer instead of replacing a
+  portable executable directly.
+- Windows and macOS installed builds now keep application files on disk instead
+  of extracting a one-file executable at every launch.
+
 ## [0.6.1] - 2026-09-18
 
 ### Changed
@@ -131,7 +149,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   workflows.
 - Added native packaging and release automation.
 
-[Unreleased]: https://github.com/aldi-f/shuttle/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/aldi-f/shuttle/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/aldi-f/shuttle/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/aldi-f/shuttle/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/aldi-f/shuttle/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/aldi-f/shuttle/compare/v0.4.1...v0.5.0
