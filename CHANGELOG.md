@@ -11,6 +11,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - Added a **Select all** action for the files and folders currently shown in the
   S3 browser.
+- Added a **Settings > Theme** menu for switching between light, dark, and
+  automatic system themes. Light is the default for new installations.
 
 ### Changed
 

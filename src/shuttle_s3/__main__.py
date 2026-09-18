@@ -10,13 +10,16 @@ def main() -> int:
         print("PySide6 is required. Install Shuttle with: pip install -e .", file=sys.stderr)
         return 1
 
-    from shuttle_s3.theme import apply_theme
+    from shuttle_s3.theme import apply_theme, refresh_auto_theme, saved_theme
     from shuttle_s3.ui import MainWindow
 
     app = QApplication(sys.argv)
     app.setApplicationName("Shuttle")
     app.setOrganizationName("Shuttle")
-    apply_theme(app)
+    apply_theme(app, saved_theme())
+    app.styleHints().colorSchemeChanged.connect(
+        lambda _color_scheme: refresh_auto_theme(app)
+    )
     window = MainWindow()
     window.show()
     return app.exec()

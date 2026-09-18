@@ -21,6 +21,8 @@ AWS credentials are kept in memory only.
 - Mirrors a prefix, with a preview and explicit deletion confirmation.
 - Displays remote-to-local paths in previews, caps very large preview logs to
   keep the interface responsive, and supports planning/transfer cancellation.
+- Uses a high-contrast light theme by default, with dark and automatic system
+  theme options under **Settings > Theme**.
 - Saves non-secret job inputs as JSON for quick reuse.
 
 ## Development
