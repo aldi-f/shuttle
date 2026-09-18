@@ -7,6 +7,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-09-18
+
+### Fixed
+
+- Declared the MSIX package's default `en-us` language so Partner Center can
+  validate its publisher identity and image resources.
+
 ## [0.8.0] - 2026-09-18
 
 ### Added

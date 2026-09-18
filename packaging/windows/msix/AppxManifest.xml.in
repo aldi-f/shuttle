@@ -14,6 +14,9 @@
     <PublisherDisplayName>aldi-f</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
   <Dependencies>
     <TargetDeviceFamily
       Name="Windows.Desktop"
