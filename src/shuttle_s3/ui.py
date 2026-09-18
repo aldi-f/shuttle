@@ -185,9 +185,13 @@ class MainWindow(QMainWindow):
         self.remote_table.setAlternatingRowColors(True)
         selection_row = QHBoxLayout()
         self.selection_status = QLabel("Tick files or folders to download them together.")
+        self.select_all_button = QPushButton("Select all")
+        self.select_all_button.setToolTip("Select all files and folders currently shown")
+        self.select_all_button.setEnabled(False)
         self.clear_selection_button = QPushButton("Clear selection")
         self.clear_selection_button.setEnabled(False)
         selection_row.addWidget(self.selection_status, 1)
+        selection_row.addWidget(self.select_all_button)
         selection_row.addWidget(self.clear_selection_button)
         layout.addLayout(selection_row)
 
@@ -277,6 +281,7 @@ class MainWindow(QMainWindow):
         self.remote_table.cellClicked.connect(self._select_remote_entry)
         self.remote_table.cellDoubleClicked.connect(self._open_remote_entry)
         self.remote_table.itemChanged.connect(self._remote_item_changed)
+        self.select_all_button.clicked.connect(self._select_all_remote_entries)
         self.clear_selection_button.clicked.connect(self._clear_remote_selection)
         self.browser_search_edit.textChanged.connect(self._filter_remote_entries)
         self.browser_search_edit.returnPressed.connect(self._browse_s3)
@@ -548,6 +553,8 @@ class MainWindow(QMainWindow):
         if prefix and not prefix.endswith("/"):
             prefix = f"{prefix}/"
             self.source_edit.setText(prefix)
+        if bucket != self.browsed_bucket or prefix != self.browsed_prefix:
+            self._clear_remote_selection()
         self._start_worker(
             lambda _signals: service.list_prefix(bucket, prefix, self.cancel_event),
             lambda entries: self._show_remote_entries(entries, bucket, prefix),
@@ -607,6 +614,7 @@ class MainWindow(QMainWindow):
             )
             self.remote_table.setItem(row, 2, QTableWidgetItem(modified))
         self.remote_table.blockSignals(False)
+        self._update_selection_status()
 
     def _open_remote_entry(self, row: int, _column: int) -> None:
         if row >= len(self.displayed_remote_entries):
@@ -634,6 +642,18 @@ class MainWindow(QMainWindow):
         self._update_selection_status()
         self._invalidate_plan()
 
+    def _select_all_remote_entries(self) -> None:
+        for entry in self.displayed_remote_entries:
+            self.selected_remote_entries[entry.key] = entry
+        self.remote_table.blockSignals(True)
+        for row in range(self.remote_table.rowCount()):
+            item = self.remote_table.item(row, 0)
+            if item is not None:
+                item.setCheckState(Qt.Checked)
+        self.remote_table.blockSignals(False)
+        self._update_selection_status()
+        self._invalidate_plan()
+
     def _clear_remote_selection(self) -> None:
         self.selected_remote_entries.clear()
         self.remote_table.blockSignals(True)
@@ -653,6 +673,13 @@ class MainWindow(QMainWindow):
             )
         else:
             self.selection_status.setText("Tick files or folders to download them together.")
+        all_displayed_selected = bool(self.displayed_remote_entries) and all(
+            entry.key in self.selected_remote_entries
+            for entry in self.displayed_remote_entries
+        )
+        self.select_all_button.setEnabled(
+            bool(self.displayed_remote_entries) and not all_displayed_selected
+        )
         self.clear_selection_button.setEnabled(bool(count))
 
     def _go_up(self) -> None:
