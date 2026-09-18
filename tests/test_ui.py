@@ -8,7 +8,7 @@ import pytest
 
 from shuttle_s3.profiles import SsoProfile
 
-pytest.importorskip("PySide6")
+pytest.importorskip("PySide6.QtGui", exc_type=ImportError)
 
 from shuttle_s3.ui import MainWindow
 
