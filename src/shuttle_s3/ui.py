@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QCompleter,
     QFileDialog,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -35,8 +36,10 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QSplitter,
+    QStyle,
     QTableWidget,
     QTableWidgetItem,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -150,30 +153,31 @@ class MainWindow(QMainWindow):
         bucket_row.addWidget(self.bucket_combo, 1)
         bucket_row.addWidget(self.load_buckets_button)
         source_form.addRow("Bucket:", bucket_row)
-
-        path_row = QHBoxLayout()
-        self.source_edit = QLineEdit()
-        self.source_edit.setPlaceholderText("reports/2025/")
-        self.browse_s3_button = QPushButton("Browse")
-        self.up_button = QPushButton("Up")
-        path_row.addWidget(self.source_edit, 1)
-        path_row.addWidget(self.up_button)
-        path_row.addWidget(self.browse_s3_button)
-        source_form.addRow("S3 path:", path_row)
-        browser_search_row = QHBoxLayout()
-        self.browser_search_edit = QLineEdit()
-        self.browser_search_edit.setPlaceholderText(
-            "Fuzzy search files and folders in the loaded folder"
-        )
-        self.browser_search_edit.setClearButtonEnabled(True)
-        self.refresh_browser_button = QPushButton("Refresh & find")
-        self.refresh_browser_button.setToolTip(
-            "Reload the current S3 folder, then apply the fuzzy search"
-        )
-        browser_search_row.addWidget(self.browser_search_edit, 1)
-        browser_search_row.addWidget(self.refresh_browser_button)
-        source_form.addRow("Find:", browser_search_row)
         layout.addLayout(source_form)
+
+        browser_panel = QGroupBox("Browse")
+        browser_layout = QVBoxLayout(browser_panel)
+        path_row = QHBoxLayout()
+        self.up_button = QToolButton()
+        self.up_button.setIcon(self.style().standardIcon(QStyle.SP_ArrowUp))
+        self.up_button.setToolTip("Go up one folder")
+        self.up_button.setAccessibleName("Go up one folder")
+        self.up_button.setEnabled(False)
+        self.source_edit = QLineEdit()
+        self.source_edit.setPlaceholderText("/")
+        self.reload_browser_button = QToolButton()
+        self.reload_browser_button.setIcon(
+            self.style().standardIcon(QStyle.SP_BrowserReload)
+        )
+        self.reload_browser_button.setToolTip(
+            "Load this S3 path and reapply the current search"
+        )
+        self.reload_browser_button.setAccessibleName("Reload S3 folder")
+        path_row.addWidget(self.up_button)
+        path_row.addWidget(QLabel("S3 path:"))
+        path_row.addWidget(self.source_edit, 1)
+        path_row.addWidget(self.reload_browser_button)
+        browser_layout.addLayout(path_row)
 
         self.remote_table = QTableWidget(0, 3)
         self.remote_table.setHorizontalHeaderLabels(
@@ -183,6 +187,7 @@ class MainWindow(QMainWindow):
         self.remote_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.remote_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.remote_table.setAlternatingRowColors(True)
+        browser_layout.addWidget(self.remote_table, 1)
         selection_row = QHBoxLayout()
         self.selection_status = QLabel("Tick files or folders to download them together.")
         self.select_all_button = QPushButton("Select all")
@@ -193,7 +198,16 @@ class MainWindow(QMainWindow):
         selection_row.addWidget(self.selection_status, 1)
         selection_row.addWidget(self.select_all_button)
         selection_row.addWidget(self.clear_selection_button)
-        layout.addLayout(selection_row)
+        browser_layout.addLayout(selection_row)
+        browser_search_row = QHBoxLayout()
+        self.browser_search_edit = QLineEdit()
+        self.browser_search_edit.setPlaceholderText(
+            "Fuzzy search files and folders in the loaded folder"
+        )
+        self.browser_search_edit.setClearButtonEnabled(True)
+        browser_search_row.addWidget(QLabel("Find:"))
+        browser_search_row.addWidget(self.browser_search_edit, 1)
+        browser_layout.addLayout(browser_search_row)
 
         lower = QWidget()
         lower_layout = QVBoxLayout(lower)
@@ -255,7 +269,7 @@ class MainWindow(QMainWindow):
         lower_layout.addWidget(self.log, 1)
 
         splitter = QSplitter(Qt.Vertical)
-        splitter.addWidget(self.remote_table)
+        splitter.addWidget(browser_panel)
         splitter.addWidget(lower)
         splitter.setSizes([280, 350])
         layout.addWidget(splitter, 1)
@@ -276,15 +290,14 @@ class MainWindow(QMainWindow):
         self.profile_combo.currentTextChanged.connect(self._profile_changed)
         self.sign_in_button.clicked.connect(self._sign_in)
         self.load_buckets_button.clicked.connect(self._load_buckets)
-        self.browse_s3_button.clicked.connect(self._browse_s3)
         self.up_button.clicked.connect(self._go_up)
+        self.reload_browser_button.clicked.connect(self._browse_s3)
+        self.source_edit.returnPressed.connect(self._browse_s3)
         self.remote_table.cellDoubleClicked.connect(self._open_remote_entry)
         self.remote_table.itemChanged.connect(self._remote_item_changed)
         self.select_all_button.clicked.connect(self._select_all_remote_entries)
         self.clear_selection_button.clicked.connect(self._clear_remote_selection)
         self.browser_search_edit.textChanged.connect(self._filter_remote_entries)
-        self.browser_search_edit.returnPressed.connect(self._browse_s3)
-        self.refresh_browser_button.clicked.connect(self._browse_s3)
         self.choose_destination_button.clicked.connect(self._choose_destination)
         self.preview_button.clicked.connect(self._preview)
         self.run_now_button.clicked.connect(self._run_now)
@@ -294,6 +307,7 @@ class MainWindow(QMainWindow):
         self.delete_job_button.clicked.connect(self._delete_job)
         self.job_combo.currentIndexChanged.connect(self._apply_job)
         self.source_edit.textChanged.connect(self._invalidate_plan)
+        self.source_edit.textChanged.connect(self._update_up_button)
         self.destination_edit.textChanged.connect(self._invalidate_plan)
         self.bucket_combo.currentTextChanged.connect(self._bucket_changed)
         self.bucket_combo.lineEdit().textEdited.connect(self._update_bucket_matches)
@@ -336,12 +350,13 @@ class MainWindow(QMainWindow):
             self.refresh_profiles_button,
             self.sign_in_button,
             self.load_buckets_button,
-            self.browse_s3_button,
-            self.refresh_browser_button,
+            self.source_edit,
+            self.reload_browser_button,
             self.preview_button,
             self.run_now_button,
         ):
             widget.setEnabled(not busy)
+        self.up_button.setEnabled(not busy and bool(self.source_edit.text().strip("/")))
         if busy:
             self.run_button.setEnabled(False)
         else:
@@ -683,6 +698,9 @@ class MainWindow(QMainWindow):
         parent = current.rpartition("/")[0]
         self.source_edit.setText(f"{parent}/" if parent else "")
         self._browse_s3()
+
+    def _update_up_button(self, path: str) -> None:
+        self.up_button.setEnabled(bool(path.strip("/")) and not self.active_workers)
 
     def _choose_destination(self) -> None:
         path = QFileDialog.getExistingDirectory(

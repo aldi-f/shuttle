@@ -14,6 +14,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Integrated S3 navigation, folder contents, selection controls, and search into
+  one Explorer-style browse panel with up and reload icon actions.
 - Made the S3 path navigation-only and required checkmarks to choose download
   sources.
 - Required exactly one checked folder for mirror transfers.
