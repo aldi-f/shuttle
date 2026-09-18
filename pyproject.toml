@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "shuttle-s3"
-version = "0.4.1"
+version = "0.5.0"
 description = "A friendly desktop S3 download and mirror client"
 readme = "README.md"
 requires-python = ">=3.11"

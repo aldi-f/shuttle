@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-18
+
 ### Added
 
 - Added a **Select all** action for the files and folders currently shown in the
@@ -115,7 +117,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   workflows.
 - Added native packaging and release automation.
 
-[Unreleased]: https://github.com/aldi-f/shuttle/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/aldi-f/shuttle/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/aldi-f/shuttle/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/aldi-f/shuttle/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/aldi-f/shuttle/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/aldi-f/shuttle/compare/v0.3.1...v0.3.2
