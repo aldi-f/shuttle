@@ -41,10 +41,10 @@ def test_sign_in_automatically_loads_buckets() -> None:
         profile_combo=Mock(),
         service=object(),
         authenticated_profile=None,
-        bucket_combo=Mock(),
         authenticator=authenticator,
         cancel_event=threading.Event(),
         auth_status=Mock(),
+        _set_bucket_choices=Mock(),
         _load_buckets=load_buckets,
     )
     window.profile_combo.currentText.return_value = selected.name
@@ -58,6 +58,7 @@ def test_sign_in_automatically_loads_buckets() -> None:
 
     assert window.authenticated_profile == selected
     boto_session.client.assert_called_once_with("s3")
+    window._set_bucket_choices.assert_called_once_with()
     load_buckets.assert_called_once_with()
 
 
@@ -70,8 +71,8 @@ def test_profile_change_reauthenticates_when_sso_session_is_shared() -> None:
         service=object(),
         profiles={first.name: first, second.name: second},
         cancel_event=threading.Event(),
-        bucket_combo=Mock(),
         auth_status=Mock(),
+        _set_bucket_choices=Mock(),
         _sign_in=sign_in,
     )
 
@@ -79,7 +80,7 @@ def test_profile_change_reauthenticates_when_sso_session_is_shared() -> None:
 
     assert window.service is None
     assert window.authenticated_profile is None
-    window.bucket_combo.clear.assert_called_once_with()
+    window._set_bucket_choices.assert_called_once_with()
     sign_in.assert_called_once_with()
 
 
@@ -92,8 +93,8 @@ def test_profile_change_requires_sign_in_for_a_different_sso_session() -> None:
         service=object(),
         profiles={first.name: first, second.name: second},
         cancel_event=threading.Event(),
-        bucket_combo=Mock(),
         auth_status=Mock(),
+        _set_bucket_choices=Mock(),
         _sign_in=sign_in,
     )
 
@@ -103,3 +104,33 @@ def test_profile_change_requires_sign_in_for_a_different_sso_session() -> None:
     window.auth_status.setText.assert_called_once_with(
         "Profile changed; sign in to continue"
     )
+
+
+def test_bucket_change_loads_the_root_browser() -> None:
+    browse = Mock()
+    window = SimpleNamespace(
+        service=object(),
+        bucket_names=["documents", "reports"],
+        _clear_bucket_browser=Mock(),
+        _browse_s3=browse,
+    )
+
+    MainWindow._bucket_changed(window, "reports")
+
+    window._clear_bucket_browser.assert_called_once_with()
+    browse.assert_called_once_with()
+
+
+def test_bucket_prompt_does_not_load_the_browser() -> None:
+    browse = Mock()
+    window = SimpleNamespace(
+        service=object(),
+        bucket_names=["documents", "reports"],
+        _clear_bucket_browser=Mock(),
+        _browse_s3=browse,
+    )
+
+    MainWindow._bucket_changed(window, "")
+
+    window._clear_bucket_browser.assert_called_once_with()
+    browse.assert_not_called()
