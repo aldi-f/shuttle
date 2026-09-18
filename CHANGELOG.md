@@ -7,6 +7,20 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-18
+
+### Added
+
+- Added a Microsoft Store MSIX package using Shuttle's registered Store identity.
+- Added Microsoft Store listing artwork, screenshots, and application icons.
+
+### Changed
+
+- Windows GitHub releases are portable single-file applications again.
+- Microsoft Store installations use Store-managed updates. Portable Windows
+  installations notify users of new versions and open the GitHub release page
+  for a manual download instead of replacing the running application.
+
 ## [0.7.0] - 2026-09-18
 
 ### Added

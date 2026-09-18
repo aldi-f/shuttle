@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="background" x1="128" y1="96" x2="896" y2="928"
+                    gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#12356B"/>
+      <stop offset="0.55" stop-color="#0C5875"/>
+      <stop offset="1" stop-color="#087E88"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="790" y1="610" x2="220" y2="770"
+                    gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#70E1E8"/>
+      <stop offset="1" stop-color="#A8F1E1"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="64" y="64" width="896" height="896" rx="224" fill="url(#background)"/>
+
+  <!-- Opposing transfer paths form a compact, recognizable S. -->
+  <path d="M278 397 C390 243 641 232 757 363"
+        fill="none" stroke="#FFFFFF" stroke-width="92" stroke-linecap="round"/>
+  <path d="M728 318 L842 397 L722 466 Z" fill="#FFFFFF"/>
+
+  <path d="M746 627 C634 781 383 792 267 661"
+        fill="none" stroke="url(#accent)" stroke-width="92" stroke-linecap="round"/>
+  <path d="M296 706 L182 627 L302 558 Z" fill="#A8F1E1"/>
+</svg>

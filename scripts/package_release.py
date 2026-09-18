@@ -58,38 +58,69 @@ def _pyinstaller_arguments(
         "--collect-data",
         "botocore",
     ]
-    # Installed desktop applications should keep their files on disk instead of
-    # unpacking a one-file executable into a temporary directory on every start.
-    arguments.append("--onefile" if system == "linux" else "--onedir")
+    # Windows and Linux are portable single-file applications. macOS uses an app
+    # bundle both in its DMG and update archive.
+    arguments.append("--onedir" if system == "macos" else "--onefile")
+    if system == "windows":
+        arguments.extend(["--icon", str(ROOT / "assets" / "branding" / "shuttle.ico")])
     if system == "macos":
         arguments.extend(["--osx-bundle-identifier", "com.github.aldi-f.shuttle"])
     arguments.append(str(ROOT / "src" / "shuttle_s3" / "__main__.py"))
     return arguments
 
 
-def _build_windows_installer(
-    distribution_directory: Path,
+def _windows_package_version(version: str) -> str:
+    parts = version.split(".")
+    if len(parts) > 3 or any(not part.isdigit() for part in parts):
+        raise ValueError(f"Cannot convert {version!r} to an MSIX package version")
+    return ".".join([*parts, *(["0"] * (4 - len(parts)))])
+
+
+def _find_windows_sdk_tool(name: str) -> str:
+    if tool := shutil.which(name):
+        return tool
+    kits = Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)"))
+    candidates = sorted((kits / "Windows Kits" / "10" / "bin").glob(f"*/x64/{name}"))
+    if not candidates:
+        raise RuntimeError(f"Could not find {name} in the Windows SDK")
+    return str(candidates[-1])
+
+
+def _build_windows_artifacts(
+    executable: Path,
     output_directory: Path,
     artifact_stem: str,
-) -> Path:
-    destination = output_directory / f"{artifact_stem}-setup.exe"
-    compiler = shutil.which("iscc")
-    if compiler is None:
-        default_compiler = Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)"))
-        compiler = str(default_compiler / "Inno Setup 6" / "ISCC.exe")
+) -> tuple[Path, Path]:
+    portable = output_directory / f"{artifact_stem}.exe"
+    shutil.copy2(executable, portable)
+
+    package_root = executable.parent / "msix"
+    package_root.mkdir()
+    shutil.copy2(executable, package_root / "Shuttle.exe")
+    shutil.copytree(
+        ROOT / "packaging" / "windows" / "msix" / "Assets",
+        package_root / "Assets",
+    )
+    manifest = (
+        ROOT / "packaging" / "windows" / "msix" / "AppxManifest.xml.in"
+    ).read_text(encoding="utf-8")
+    manifest = manifest.replace("@VERSION@", _windows_package_version(application_version()))
+    (package_root / "AppxManifest.xml").write_text(manifest, encoding="utf-8")
+
+    msix = output_directory / f"{artifact_stem}.msix"
     subprocess.run(
         [
-            compiler,
-            f"/DSourceDir={distribution_directory / 'Shuttle'}",
-            f"/DOutputDir={output_directory}",
-            f"/DOutputBaseFilename={destination.stem}",
-            f"/DAppVersion={application_version()}",
-            str(ROOT / "packaging" / "windows" / "Shuttle.iss"),
+            _find_windows_sdk_tool("makeappx.exe"),
+            "pack",
+            "/d",
+            str(package_root),
+            "/p",
+            str(msix),
+            "/o",
         ],
-        cwd=ROOT,
         check=True,
     )
-    return destination
+    return portable, msix
 
 
 def _build_macos_artifacts(
@@ -152,8 +183,8 @@ def build(output_directory: Path) -> Path:
 
     artifact_stem = f"Shuttle-{system}-{architecture}"
     if system == "windows":
-        destination = _build_windows_installer(
-            distribution_directory,
+        destination, _msix = _build_windows_artifacts(
+            distribution_directory / "Shuttle.exe",
             output_directory,
             artifact_stem,
         )

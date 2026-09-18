@@ -18,6 +18,7 @@ from shuttle_s3.updater import (
     _version_tuple,
     _write_unix_helper,
     _write_windows_helper,
+    install_and_restart,
 )
 
 
@@ -85,7 +86,7 @@ def release(checksum: str) -> bytes:
 
 def test_platform_asset_names() -> None:
     assert _platform_asset("linux", "x86_64") == "Shuttle-linux-amd64"
-    assert _platform_asset("win32", "AMD64") == "Shuttle-windows-amd64-setup.exe"
+    assert _platform_asset("win32", "AMD64") == "Shuttle-windows-amd64.exe"
     assert _platform_asset("darwin", "arm64") == "Shuttle-macos-arm64.zip"
     with pytest.raises(RuntimeError, match="Intel macOS"):
         _platform_asset("darwin", "x86_64")
@@ -149,6 +150,16 @@ def test_installer_waits_for_application_and_pyinstaller_parent(monkeypatch: Any
     assert _installer_process_ids() == (123, 456)
 
 
+def test_windows_updates_require_manual_download(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    monkeypatch.setattr("shuttle_s3.updater.sys.frozen", True, raising=False)
+    monkeypatch.setattr("shuttle_s3.updater.sys.platform", "win32")
+
+    with pytest.raises(RuntimeError, match="downloaded manually"):
+        install_and_restart(tmp_path / "Shuttle-windows-amd64.exe")
+
+
 def test_macos_translocated_app_cannot_be_updated() -> None:
     application = Path(
         "/private/var/folders/random/AppTranslocation/ABC/d/Shuttle.app"
@@ -185,7 +196,7 @@ def test_linux_helper_restarts_with_clean_environment(
     assert popen_calls[0][1]["stderr"] is not None
 
 
-def test_windows_helper_waits_then_runs_installer_and_installed_app(
+def test_windows_helper_waits_then_replaces_and_restarts_portable_app(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
     popen_calls: list[tuple[list[str], dict[str, Any]]] = []
@@ -195,7 +206,8 @@ def test_windows_helper_waits_then_runs_installer_and_installed_app(
     )
 
     helper = _write_windows_helper(
-        tmp_path / "Shuttle-windows-amd64-setup.exe",
+        tmp_path / "Shuttle.exe",
+        tmp_path / "Shuttle-windows-amd64.exe",
         process_ids=(123, 456),
         log_directory=tmp_path / "settings",
     )
@@ -206,10 +218,8 @@ def test_windows_helper_waits_then_runs_installer_and_installed_app(
     assert "ProgressBarStyle]::Marquee" in script
     assert 'Waiting for Shuttle to close...' in script
     assert 'Installing Shuttle update...' in script
-    assert "Start-Process -FilePath $Installer" in script
-    assert "-PassThru -ErrorAction Stop" in script
-    assert 'Programs\\Shuttle\\Shuttle.exe' in script
-    assert "Copy-Item" not in script
-    assert popen_calls[0][0][-3] == "123,456"
+    assert "Copy-Item -Force -LiteralPath $Replacement -Destination $Current" in script
+    assert "Start-Process -FilePath $Current" in script
+    assert popen_calls[0][0][-4] == "123,456"
     assert popen_calls[0][0][-1] == str(tmp_path / "settings" / "Shuttle-update.log")
     assert popen_calls[0][1]["env"]["PYINSTALLER_RESET_ENVIRONMENT"] == "1"

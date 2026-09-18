@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import json
 import os
@@ -22,6 +23,7 @@ import certifi
 REPOSITORY = "aldi-f/shuttle"
 LATEST_RELEASE_URL = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
 USER_AGENT = "Shuttle updater"
+APPMODEL_ERROR_NO_PACKAGE = 15700
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,7 +57,7 @@ def _platform_asset(
     if architecture is None:
         raise RuntimeError(f"Shuttle updates do not support architecture {machine!r}")
     if system.startswith("win"):
-        return f"Shuttle-windows-{architecture}-setup.exe"
+        return f"Shuttle-windows-{architecture}.exe"
     if system == "darwin":
         if architecture != "arm64":
             raise RuntimeError("Shuttle does not publish updates for Intel macOS")
@@ -63,6 +65,20 @@ def _platform_asset(
     if system.startswith("linux"):
         return f"Shuttle-linux-{architecture}"
     raise RuntimeError(f"Shuttle updates do not support platform {system!r}")
+
+
+def is_store_package() -> bool:
+    """Return whether this process is running with an MSIX package identity."""
+    if sys.platform != "win32":
+        return False
+    length = ctypes.c_uint32()
+    result = ctypes.windll.kernel32.GetCurrentPackageFullName(
+        ctypes.byref(length),
+        None,
+    )
+    if result == APPMODEL_ERROR_NO_PACKAGE:
+        return False
+    return result == 0 or length.value > 0
 
 
 class UpdateClient:
@@ -262,16 +278,17 @@ def _restart_environment() -> dict[str, str]:
 
 
 def _write_windows_helper(
-    installer: Path,
+    current: Path,
+    replacement: Path,
     *,
     process_ids: tuple[int, ...] | None = None,
     log_directory: Path | None = None,
 ) -> Path:
-    helper = installer.parent / "install-update.ps1"
+    helper = replacement.parent / "install-update.ps1"
     process_ids = process_ids or (os.getpid(),)
     log = _installer_log_path(log_directory)
     helper.write_text(
-        "param($ProcessIds, $Installer, $Log)\n"
+        "param($ProcessIds, $Current, $Replacement, $Log)\n"
         '$ErrorActionPreference = "Stop"\n'
         '"Starting Shuttle update at $(Get-Date)" | Set-Content -LiteralPath $Log\n'
         "Add-Type -AssemblyName System.Windows.Forms\n"
@@ -304,12 +321,7 @@ def _write_windows_helper(
         "$progress.MarqueeAnimationSpeed = 25\n"
         "$form.Controls.Add($progress)\n"
         "\n"
-        "$arguments = @(\n"
-        '  "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"\n'
-        ")\n"
-        '$installed = Join-Path $env:LOCALAPPDATA "Programs\\Shuttle\\Shuttle.exe"\n'
-        '$state = @{ Phase = "waiting"; InstallerProcess = $null; '
-        "ProcessIds = $ProcessIds.Split(',') }\n"
+        '$state = @{ Phase = "waiting"; ProcessIds = $ProcessIds.Split(\',\') }\n'
         "$timer = New-Object System.Windows.Forms.Timer\n"
         "$timer.Interval = 200\n"
         "$timer.Add_Tick({\n"
@@ -324,14 +336,28 @@ def _write_windows_helper(
         "    if (-not $applicationRunning) {\n"
         '      $state.Phase = "installing"\n'
         '      $status.Text = "Installing Shuttle update..."\n'
+        "      $form.Refresh()\n"
         "      try {\n"
-        "        $state.InstallerProcess = Start-Process -FilePath $Installer "
-        "-ArgumentList $arguments -PassThru -ErrorAction Stop\n"
+        '        $backup = "$Current.shuttle-backup"\n'
+        "        Copy-Item -Force -LiteralPath $Current -Destination $backup\n"
+        "        try {\n"
+        "          Copy-Item -Force -LiteralPath $Replacement -Destination $Current\n"
+        "        } catch {\n"
+        "          Copy-Item -Force -LiteralPath $backup -Destination $Current\n"
+        "          throw\n"
+        "        }\n"
+        "        Remove-Item -Force -LiteralPath $backup\n"
+        '        $status.Text = "Starting Shuttle..."\n'
+        "        $form.Refresh()\n"
+        "        Start-Process -FilePath $Current\n"
+        '        "Shuttle update completed successfully." | Add-Content -LiteralPath $Log\n'
+        "        $timer.Stop()\n"
+        "        $form.Close()\n"
         "      } catch {\n"
         "        $timer.Stop()\n"
         "        $_ | Out-String | Add-Content -LiteralPath $Log\n"
         "        [System.Windows.Forms.MessageBox]::Show(\n"
-        '          "Could not start the Shuttle installer. See the installer log at:'
+        '          "Could not replace the Shuttle application. See the update log at:'
         '`n$Log",\n'
         '          "Shuttle Update",\n'
         "          [System.Windows.Forms.MessageBoxButtons]::OK,\n"
@@ -340,31 +366,11 @@ def _write_windows_helper(
         "        $form.Close()\n"
         "      }\n"
         "    }\n"
-        '  } elseif ($state.Phase -eq "installing" -and '
-        "$state.InstallerProcess.HasExited) {\n"
-        "    $timer.Stop()\n"
-        "    if ($state.InstallerProcess.ExitCode -eq 0) {\n"
-        '      $status.Text = "Starting Shuttle..."\n'
-        "      $form.Refresh()\n"
-        "      Start-Process -FilePath $installed\n"
-        '      "Shuttle update completed successfully." | Add-Content -LiteralPath $Log\n'
-        "    } else {\n"
-        '      "Installer exit code: $($state.InstallerProcess.ExitCode)" '
-        "| Add-Content -LiteralPath $Log\n"
-        "      [System.Windows.Forms.MessageBox]::Show(\n"
-        '        "The Shuttle installer exited with code '
-        '$($state.InstallerProcess.ExitCode). See the installer log at:`n$Log",\n'
-        '        "Shuttle Update",\n'
-        "        [System.Windows.Forms.MessageBoxButtons]::OK,\n"
-        "        [System.Windows.Forms.MessageBoxIcon]::Error\n"
-        "      )\n"
-        "    }\n"
-        "    $form.Close()\n"
         "  }\n"
         "})\n"
         "$form.Add_Shown({ $timer.Start() })\n"
         "[System.Windows.Forms.Application]::Run($form)\n"
-        "Remove-Item -Force -LiteralPath $Installer -ErrorAction SilentlyContinue\n"
+        "Remove-Item -Force -LiteralPath $Replacement -ErrorAction SilentlyContinue\n"
         "Remove-Item -Force -LiteralPath $MyInvocation.MyCommand.Path "
         "-ErrorAction SilentlyContinue\n",
         encoding="utf-8",
@@ -378,7 +384,8 @@ def _write_windows_helper(
             "-File",
             str(helper),
             ",".join(str(process_id) for process_id in process_ids),
-            str(installer),
+            str(current),
+            str(replacement),
             str(log),
         ],
         env=_restart_environment(),
@@ -442,11 +449,8 @@ def install_and_restart(download: Path, *, data_directory: Path | None = None) -
         return
 
     if sys.platform == "win32":
-        _write_windows_helper(
-            download,
-            process_ids=_installer_process_ids(),
-            log_directory=data_directory,
+        raise RuntimeError(
+            "Windows updates must be downloaded manually from the GitHub release page"
         )
-        return
     raise RuntimeError(f"Unsupported update platform: {sys.platform}")
 

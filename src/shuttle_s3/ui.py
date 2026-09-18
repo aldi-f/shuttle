@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import threading
 from collections.abc import Callable
 from datetime import datetime
@@ -15,9 +16,10 @@ from PySide6.QtCore import (
     Qt,
     QThreadPool,
     QTimer,
+    QUrl,
     Signal,
 )
-from PySide6.QtGui import QAction, QActionGroup
+from PySide6.QtGui import QAction, QActionGroup, QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -58,7 +60,7 @@ from .s3 import (
     format_bytes,
 )
 from .theme import apply_theme, save_theme, saved_theme
-from .updater import AvailableUpdate, UpdateClient, install_and_restart
+from .updater import AvailableUpdate, UpdateClient, install_and_restart, is_store_package
 
 PREVIEW_LOG_ITEM_LIMIT = 250
 BUCKET_PLACEHOLDER = "Select a bucket"
@@ -117,6 +119,7 @@ class MainWindow(QMainWindow):
         self.browsed_prefix = ""
         self.bucket_names: list[str] = []
         self.update_client = UpdateClient()
+        self.store_package = is_store_package()
         self.background_workers: set[Worker] = set()
         self.settings = QSettings()
 
@@ -297,6 +300,11 @@ class MainWindow(QMainWindow):
         settings_menu = self.menuBar().addMenu("Settings")
         self.automatic_updates_action = QAction("Automatically check for updates", self)
         self.automatic_updates_action.setCheckable(True)
+        self.automatic_updates_action.setEnabled(not self.store_package)
+        if self.store_package:
+            self.automatic_updates_action.setToolTip(
+                "Microsoft Store manages updates for this installation."
+            )
         self.automatic_updates_action.setChecked(
             self.settings.value("updates/automaticCheck", True, type=bool)
         )
@@ -324,6 +332,11 @@ class MainWindow(QMainWindow):
             self.theme_action_group.addAction(action)
             theme_menu.addAction(action)
         check_updates_action = QAction("Check for updates…", self)
+        check_updates_action.setEnabled(not self.store_package)
+        if self.store_package:
+            check_updates_action.setToolTip(
+                "Microsoft Store manages updates for this installation."
+            )
         check_updates_action.triggered.connect(lambda: self._check_for_updates(manual=True))
         self.menuBar().addMenu("Help").addAction(check_updates_action)
 
@@ -505,6 +518,18 @@ class MainWindow(QMainWindow):
     def _offer_update(self, update: AvailableUpdate) -> None:
         if self.active_workers:
             QTimer.singleShot(3000, lambda: self._offer_update(update))
+            return
+        if sys.platform == "win32":
+            answer = QMessageBox.question(
+                self,
+                "Shuttle update available",
+                f"Shuttle {update.version} is available. You are using {__version__}.\n\n"
+                "Open the GitHub release page to download the portable update?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if answer == QMessageBox.Yes:
+                QDesktopServices.openUrl(QUrl(update.release_url))
             return
         answer = QMessageBox.question(
             self,

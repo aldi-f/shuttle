@@ -153,20 +153,20 @@ python -m pip install -e ".[build]"
 python scripts/package_release.py
 ```
 
-Windows builds use an Inno Setup per-user installer. It installs Shuttle under
-`%LOCALAPPDATA%\Programs\Shuttle`, registers it for uninstall, and creates Start
-menu and optional desktop shortcuts without requiring administrator access.
-macOS builds use the conventional DMG with a link to `/Applications`. Both use
-PyInstaller's directory mode, so installed apps do not unpack themselves into a
-temporary directory on every launch. macOS builds must be produced on macOS,
-and Windows builds on Windows.
+Windows builds produce a portable single-file executable and an MSIX package for
+Microsoft Store submission. Store installations receive updates through
+Microsoft Store; portable installations notify users and direct them to the
+GitHub release page for a manual download. macOS builds use the conventional DMG
+with a link to `/Applications`. macOS builds must be produced on macOS, and
+Windows builds on Windows.
 
 Pushing a tag beginning with `v`, such as `v0.1.0`, triggers the
 `Build release` GitHub Actions workflow. It runs tests, builds these native
 artifacts, and attaches them to a GitHub Release:
 
 - `Shuttle-linux-amd64`
-- `Shuttle-windows-amd64-setup.exe`
+- `Shuttle-windows-amd64.exe`
+- `Shuttle-windows-amd64.msix`
 - `Shuttle-macos-arm64.dmg`
 - `Shuttle-macos-arm64.zip`
 
@@ -178,7 +178,7 @@ git push origin v0.1.0
 ```
 
 The macOS DMG is the user-facing installer; its ZIP is used only by the in-app
-updater. The Windows and macOS artifacts are currently unsigned. Windows
-SmartScreen and macOS Gatekeeper may warn until platform code signing (and
-Apple notarization) are configured.
+updater. The portable Windows executable and macOS artifacts are currently
+unsigned, so Windows SmartScreen and macOS Gatekeeper may warn. Microsoft signs
+the MSIX when it is published through Microsoft Store.
 
