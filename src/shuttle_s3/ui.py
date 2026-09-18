@@ -153,7 +153,7 @@ class MainWindow(QMainWindow):
 
         path_row = QHBoxLayout()
         self.source_edit = QLineEdit()
-        self.source_edit.setPlaceholderText("reports/2025/ or reports/summary.csv")
+        self.source_edit.setPlaceholderText("reports/2025/")
         self.browse_s3_button = QPushButton("Browse")
         self.up_button = QPushButton("Up")
         path_row.addWidget(self.source_edit, 1)
@@ -278,7 +278,6 @@ class MainWindow(QMainWindow):
         self.load_buckets_button.clicked.connect(self._load_buckets)
         self.browse_s3_button.clicked.connect(self._browse_s3)
         self.up_button.clicked.connect(self._go_up)
-        self.remote_table.cellClicked.connect(self._select_remote_entry)
         self.remote_table.cellDoubleClicked.connect(self._open_remote_entry)
         self.remote_table.itemChanged.connect(self._remote_item_changed)
         self.select_all_button.clicked.connect(self._select_all_remote_entries)
@@ -620,13 +619,10 @@ class MainWindow(QMainWindow):
         if row >= len(self.displayed_remote_entries):
             return
         entry = self.displayed_remote_entries[row]
+        if not entry.is_prefix:
+            return
         self.source_edit.setText(entry.key)
-        if entry.is_prefix:
-            self._browse_s3()
-
-    def _select_remote_entry(self, row: int, _column: int) -> None:
-        if row < len(self.displayed_remote_entries):
-            self.source_edit.setText(self.displayed_remote_entries[row].key)
+        self._browse_s3()
 
     def _remote_item_changed(self, item: QTableWidgetItem) -> None:
         if item.column() != 0:
@@ -669,7 +665,7 @@ class MainWindow(QMainWindow):
         count = len(self.selected_remote_entries)
         if count:
             self.selection_status.setText(
-                f"{count} item(s) selected. Checked items override the S3 path."
+                f"{count} item(s) selected for transfer."
             )
         else:
             self.selection_status.setText("Tick files or folders to download them together.")
@@ -709,20 +705,16 @@ class MainWindow(QMainWindow):
             "overwrite": self.overwrite_check.isChecked(),
         }
 
-    def _known_browser_entries(self, inputs: dict[str, Any]) -> list[RemoteEntry] | None:
-        normalized_source = inputs["source"].lstrip("/")
-        normalized_prefix = (
-            normalized_source
-            if normalized_source.endswith("/")
-            else f"{normalized_source}/"
-        )
-        if (
-            inputs["bucket"] == self.browsed_bucket
-            and normalized_prefix == self.browsed_prefix
-            and not any(entry.is_prefix for entry in self.remote_entries)
-        ):
-            return self.remote_entries
-        return None
+    def _transfer_selection(self, mode: str) -> list[RemoteEntry] | None:
+        entries = list(self.selected_remote_entries.values())
+        if mode == "download":
+            if not entries:
+                self._show_error("Tick at least one file or folder to download")
+                return None
+        elif len(entries) != 1 or not entries[0].is_prefix:
+            self._show_error("Mirror mode requires exactly one checked folder")
+            return None
+        return entries
 
     def _update_option_help(self, *_args: Any) -> None:
         mode = self.mode_combo.currentData()
@@ -755,20 +747,18 @@ class MainWindow(QMainWindow):
         except ValueError as error:
             self._show_error(str(error))
             return
-        selected_entries = list(self.selected_remote_entries.values())
-        if selected_entries and inputs["mode"] != "download":
-            self._show_error("File picker selections can only use Download / update mode")
+        selected_entries = self._transfer_selection(inputs["mode"])
+        if selected_entries is None:
             return
         self.current_plan = None
         self.run_button.setEnabled(False)
         self.log.setPlainText(
-            "Building preview… Shuttle is listing the selected S3 path and checking "
+            "Building preview… Shuttle is listing the checked items and checking "
             "the local destination. Large folders can take a while.\n"
         )
         self.auth_status.setText("Building transfer preview…")
         self.progress.setRange(0, 0)
         self.progress.setFormat("Building preview…")
-        known_entries = self._known_browser_entries(inputs)
 
         def show(plan: Any) -> None:
             self.current_plan = plan
@@ -790,7 +780,7 @@ class MainWindow(QMainWindow):
             def on_status(message: str) -> None:
                 signals.status.emit(f"Preview: {message}")
 
-            if selected_entries:
+            if inputs["mode"] == "download":
                 return service.plan_selection(
                     bucket=inputs["bucket"],
                     entries=selected_entries,
@@ -800,9 +790,12 @@ class MainWindow(QMainWindow):
                     on_status=on_status,
                 )
             return service.plan(
-                **inputs,
+                bucket=inputs["bucket"],
+                source=selected_entries[0].key,
+                destination=inputs["destination"],
+                mode="mirror",
+                overwrite=inputs["overwrite"],
                 cancel=self.cancel_event,
-                known_entries=known_entries,
                 on_status=on_status,
             )
 
@@ -845,9 +838,8 @@ class MainWindow(QMainWindow):
         except ValueError as error:
             self._show_error(str(error))
             return
-        selected_entries = list(self.selected_remote_entries.values())
-        if selected_entries and inputs["mode"] != "download":
-            self._show_error("File picker selections can only use Download / update mode")
+        selected_entries = self._transfer_selection(inputs["mode"])
+        if selected_entries is None:
             return
         answer = QMessageBox.warning(
             self,
@@ -859,12 +851,11 @@ class MainWindow(QMainWindow):
         )
         if answer != QMessageBox.Yes:
             return
-        known_entries = self._known_browser_entries(inputs)
         self.current_plan = None
         self.log.clear()
         self.progress.setRange(0, 0)
 
-        if selected_entries:
+        if inputs["mode"] == "download":
             self.log.setPlainText("Preparing the checked files and folders for download…\n")
             self.auth_status.setText("Preparing selected items…")
 
@@ -887,43 +878,21 @@ class MainWindow(QMainWindow):
             self._start_worker(prepare_selection, selection_ready, self._transfer_finished)
             return
 
-        if inputs["mode"] == "download":
-            self.log.setPlainText(
-                "Starting without a full preview. Files will download as S3 listing "
-                "pages arrive.\n"
-            )
-            self.auth_status.setText("Starting direct download…")
-
-            def download(signals: WorkerSignals) -> Any:
-                def report(message: str) -> None:
-                    signals.status.emit(message)
-                    signals.log.emit(message)
-
-                return service.download_now(
-                    bucket=inputs["bucket"],
-                    source=inputs["source"],
-                    destination=inputs["destination"],
-                    overwrite=inputs["overwrite"],
-                    cancel=self.cancel_event,
-                    known_entries=known_entries,
-                    on_status=report,
-                    on_progress=signals.progress.emit,
-                )
-
-            self._start_worker(download, self._transfer_complete, self._transfer_finished)
-            return
-
         self.log.setPlainText(
-            "Mirror mode must inventory S3 and the local destination before it can safely "
-            "delete files. Shuttle will run automatically when that safety scan finishes.\n"
+            "Mirror mode must inventory the checked S3 folder and local destination before "
+            "it can safely delete files. Shuttle will run automatically when that safety "
+            "scan finishes.\n"
         )
         self.auth_status.setText("Preparing mirror safety scan…")
 
         def prepare_mirror(signals: WorkerSignals) -> Any:
             return service.plan(
-                **inputs,
+                bucket=inputs["bucket"],
+                source=selected_entries[0].key,
+                destination=inputs["destination"],
+                mode="mirror",
+                overwrite=inputs["overwrite"],
                 cancel=self.cancel_event,
-                known_entries=known_entries,
                 on_status=signals.status.emit,
             )
 
