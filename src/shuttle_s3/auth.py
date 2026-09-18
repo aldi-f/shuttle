@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 import threading
 import time
 import webbrowser
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import boto3
@@ -40,20 +44,100 @@ class _CachedAccessToken:
     expires_at: float
 
 
+class _TokenCache:
+    def __init__(self, path: Path | None) -> None:
+        self.path = path
+        self.tokens = self._load()
+
+    @staticmethod
+    def _key(session_key: tuple[str, str, tuple[str, ...]]) -> str:
+        serialized = json.dumps(session_key, separators=(",", ":"))
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    def get(
+        self, session_key: tuple[str, str, tuple[str, ...]]
+    ) -> _CachedAccessToken | None:
+        return self.tokens.get(self._key(session_key))
+
+    def set(
+        self,
+        session_key: tuple[str, str, tuple[str, ...]],
+        token: _CachedAccessToken,
+    ) -> None:
+        self.tokens[self._key(session_key)] = token
+        self._save()
+
+    def remove(self, session_key: tuple[str, str, tuple[str, ...]]) -> None:
+        if self.tokens.pop(self._key(session_key), None) is not None:
+            self._save()
+
+    def clear_memory(self) -> None:
+        self.tokens.clear()
+
+    def _load(self) -> dict[str, _CachedAccessToken]:
+        if self.path is None:
+            return {}
+        try:
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict):
+                return {}
+            return {
+                key: _CachedAccessToken(
+                    value=str(value["access_token"]),
+                    expires_at=float(value["expires_at"]),
+                )
+                for key, value in payload.items()
+                if isinstance(value, dict)
+            }
+        except (OSError, ValueError, TypeError):
+            return {}
+
+    def _save(self) -> None:
+        if self.path is None:
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path = self.path.with_suffix(f"{self.path.suffix}.tmp")
+        payload = {
+            key: {
+                "access_token": token.value,
+                "expires_at": token.expires_at,
+            }
+            for key, token in self.tokens.items()
+            if token.expires_at > time.time()
+        }
+        descriptor = os.open(
+            temporary_path,
+            os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+            0o600,
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8") as cache_file:
+            json.dump(payload, cache_file)
+        temporary_path.replace(self.path)
+
+
 StatusCallback = Callable[[str], None]
 DeviceCallback = Callable[[DeviceAuthorization], None]
 
 
 class SsoAuthenticator:
-    """Authenticate without reading or writing the AWS CLI SSO token cache."""
+    """Authenticate using Shuttle's private, expiry-bound SSO token cache."""
 
-    def __init__(self, boto_session: boto3.Session | None = None) -> None:
+    def __init__(
+        self,
+        boto_session: boto3.Session | None = None,
+        *,
+        token_cache_path: Path | None = None,
+    ) -> None:
         self._base_session = boto_session or boto3.Session()
-        self._access_tokens: dict[tuple[str, str, tuple[str, ...]], _CachedAccessToken] = {}
+        self._token_cache = _TokenCache(token_cache_path)
 
     def clear(self) -> None:
-        """Forget all in-memory Identity Center sessions."""
-        self._access_tokens.clear()
+        """Forget loaded tokens without deleting unexpired persisted sessions."""
+        self._token_cache.clear_memory()
+
+    def has_session(self, profile: SsoProfile) -> bool:
+        token = self._token_cache.get(profile.session_key)
+        return token is not None and token.expires_at > time.time() + 60
 
     def authenticate(
         self,
@@ -64,13 +148,13 @@ class SsoAuthenticator:
         on_device: DeviceCallback | None = None,
     ) -> AuthenticatedSession:
         status = on_status or (lambda _message: None)
-        cache_key = (profile.start_url, profile.sso_region, profile.scopes)
-        cached_token = self._access_tokens.get(cache_key)
-        if cached_token is not None and cached_token.expires_at > time.monotonic() + 60:
+        cache_key = profile.session_key
+        cached_token = self._token_cache.get(cache_key)
+        if cached_token is not None and cached_token.expires_at > time.time() + 60:
             access_token = cached_token.value
             status("Reusing this session’s IAM Identity Center sign-in…")
         else:
-            self._access_tokens.pop(cache_key, None)
+            self._token_cache.remove(cache_key)
             access_token = self._authorize_device(
                 profile,
                 cancel=cancel,
@@ -92,7 +176,7 @@ class SsoAuthenticator:
                 accessToken=access_token,
             )
         except sso.exceptions.UnauthorizedException:
-            self._access_tokens.pop(cache_key, None)
+            self._token_cache.remove(cache_key)
             raise RuntimeError(
                 "The IAM Identity Center session is no longer valid. Sign in again."
             ) from None
@@ -118,7 +202,7 @@ class SsoAuthenticator:
         status: StatusCallback,
         on_device: DeviceCallback | None,
     ) -> str:
-        cache_key = (profile.start_url, profile.sso_region, profile.scopes)
+        cache_key = profile.session_key
         oidc = self._base_session.client(
             "sso-oidc", region_name=profile.sso_region, config=USER_AGENT
         )
@@ -169,9 +253,12 @@ class SsoAuthenticator:
         if cancel.is_set():
             raise AuthenticationCancelled("Sign-in cancelled")
         access_token = token["accessToken"]
-        self._access_tokens[cache_key] = _CachedAccessToken(
-            value=access_token,
-            expires_at=time.monotonic() + int(token["expiresIn"]),
+        self._token_cache.set(
+            cache_key,
+            _CachedAccessToken(
+                value=access_token,
+                expires_at=time.time() + int(token["expiresIn"]),
+            ),
         )
         return access_token
 

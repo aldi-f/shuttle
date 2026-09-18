@@ -19,6 +19,11 @@ class SsoProfile:
     region: str
     scopes: tuple[str, ...] = ("sso:account:access",)
 
+    @property
+    def session_key(self) -> tuple[str, str, tuple[str, ...]]:
+        """Identify profiles that can share an Identity Center access token."""
+        return (self.start_url, self.sso_region, self.scopes)
+
 
 def default_config_path() -> Path:
     return Path.home() / ".aws" / "config"

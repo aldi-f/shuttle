@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from shuttle_s3.auth import DEVICE_GRANT, SsoAuthenticator
@@ -129,4 +130,39 @@ def test_reuses_login_for_profiles_in_same_identity_center(monkeypatch: Any) -> 
 
     assert base_session.oidc.registration_count == 1
     assert base_session.sso.requested_roles == ["Reader", "Analyst"]
+    assert opened == ["https://device.example?code=ABCD-EFGH"]
+
+
+def test_persists_login_until_its_expiry(monkeypatch: Any, tmp_path: Path) -> None:
+    opened: list[str] = []
+    monkeypatch.setattr("shuttle_s3.auth.webbrowser.open", opened.append)
+    cache_path = tmp_path / "sso-session.json"
+    profile = SsoProfile(
+        name="reader",
+        start_url="https://example.awsapps.com/start",
+        sso_region="eu-west-1",
+        account_id="123456789012",
+        role_name="Reader",
+        region="eu-west-1",
+    )
+    first_session = FakeBaseSession()
+
+    first_authenticator = SsoAuthenticator(
+        first_session,
+        token_cache_path=cache_path,
+    )
+    first_authenticator.authenticate(profile, cancel=NeverCancelled())
+
+    restored_session = FakeBaseSession()
+    restored_authenticator = SsoAuthenticator(
+        restored_session,
+        token_cache_path=cache_path,
+    )
+    assert restored_authenticator.has_session(profile)
+    restored_authenticator.authenticate(profile, cancel=NeverCancelled())
+
+    assert cache_path.exists()
+    assert first_session.oidc.registration_count == 1
+    assert restored_session.oidc.registration_count == 0
+    assert restored_session.sso.requested_roles == ["Reader"]
     assert opened == ["https://device.example?code=ABCD-EFGH"]
